@@ -1,0 +1,75 @@
+name: Multi-Stage Homelab Deployment
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  deploy-dev:
+    if: github.ref_name != 'main'
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Stop old dev container
+        run: |
+          docker stop go-api-dev || true
+          docker rm go-api-dev || true
+
+      - name: Build dev image
+        run: docker build -t go-api:dev .
+
+      - name: Start dev container
+        run: |
+          docker run -d \
+            --name go-api-dev \
+            --restart always \
+            -p 8090:8080 \
+            go-api:dev
+
+      - name: Cleanup
+        run: docker image prune -f
+
+  gatecheck-prod:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Await Manual Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: HTMLuke
+          minimum-approvals: 1
+          issue-title: "Deploy OneLab-API to Production"
+          issue-body: "Please reply with 'approve' or 'deny' to control the Homelab VM deployment."
+
+  deploy-prod:
+    needs: gatecheck-prod
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Stop old prod container
+        run: |
+          docker stop go-api-prod || true
+          docker rm go-api-prod || true
+
+      - name: Build prod image
+        run: docker build -t go-api:prod .
+
+      - name: Start prod container
+        run: |
+          docker run -d \
+            --name go-api-prod \
+            --restart always \
+            -p 8080:8080 \
+            go-api:prod
+
+      - name: Cleanup
+        run: docker image prune -f
