@@ -34,6 +34,7 @@ jobs:
         run: docker image prune -f
 
   gatecheck-prod:
+    needs: deploy-dev
     if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     permissions:
