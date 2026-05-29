@@ -16,19 +16,19 @@ jobs:
 
       - name: Stop old dev container
         run: |
-          docker stop go-api-dev || true
-          docker rm go-api-dev || true
+          docker stop onelab-api-dev || true
+          docker rm onelab-api-dev || true
 
       - name: Build dev image
-        run: docker build -t go-api:dev .
+        run: docker build -t onelab-api:dev .
 
       - name: Start dev container
         run: |
           docker run -d \
-            --name go-api-dev \
+            --name onelab-api-dev \
             --restart always \
             -p 8090:8080 \
-            go-api:dev
+            onelab-api:dev
 
       - name: Cleanup
         run: docker image prune -f
@@ -58,19 +58,19 @@ jobs:
 
       - name: Stop old prod container
         run: |
-          docker stop go-api-prod || true
-          docker rm go-api-prod || true
+          docker stop onelab-api-prod || true
+          docker rm onelab-api-prod || true
 
       - name: Build prod image
-        run: docker build -t go-api:prod .
+        run: docker build -t onelab-api:prod .
 
       - name: Start prod container
         run: |
           docker run -d \
-            --name go-api-prod \
+            --name onelab-api-prod \
             --restart always \
             -p 8080:8080 \
-            go-api:prod
+            onelab-api:prod
 
       - name: Cleanup
         run: docker image prune -f
