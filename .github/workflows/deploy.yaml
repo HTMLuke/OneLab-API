@@ -36,6 +36,7 @@ jobs:
   gatecheck-prod:
     needs: deploy-dev
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+    runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
