@@ -45,9 +45,16 @@ func main() {
 	// Initialize App Controller and specify exactly what Services are available.
 	fController := fileService.NewFileController()
 
-	// Inject integrations securely configured with their base URLs from the config service
-	fController.AddIntegration("nextcloud", fileService.NewNextcloudService(cfgService.GetNextcloudURL()))
-	fController.AddIntegration("paperless", fileService.NewPaperlessService(cfgService.GetPaperlessURL()))
+	// Inject integrations securely configured with their base URLs and credentials from the config service
+	fController.AddIntegration("nextcloud", fileService.NewNextcloudService(
+		cfgService.GetNextcloudURL(),
+		cfgService.GetNextcloudUser(),
+		cfgService.GetNextcloudPassword(),
+	))
+	fController.AddIntegration("paperless", fileService.NewPaperlessService(
+		cfgService.GetPaperlessURL(),
+		cfgService.GetPaperlessToken(),
+	))
 
 	fController.RegisterRoutes(mux)
 

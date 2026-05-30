@@ -9,11 +9,13 @@ import (
 // PaperlessService handles sending files to Paperless-ngx.
 type PaperlessService struct {
 	apiURL string
+	token  string
 }
 
-func NewPaperlessService(apiURL string) *PaperlessService {
+func NewPaperlessService(apiURL, token string) *PaperlessService {
 	return &PaperlessService{
 		apiURL: apiURL,
+		token:  token,
 	}
 }
 

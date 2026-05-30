@@ -8,12 +8,16 @@ import (
 
 // NextcloudService handles sending files to Nextcloud.
 type NextcloudService struct {
-	apiURL string
+	apiURL   string
+	username string
+	password string
 }
 
-func NewNextcloudService(apiURL string) *NextcloudService {
+func NewNextcloudService(apiURL, username, password string) *NextcloudService {
 	return &NextcloudService{
-		apiURL: apiURL,
+		apiURL:   apiURL,
+		username: username,
+		password: password,
 	}
 }
 
