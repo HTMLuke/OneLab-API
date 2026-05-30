@@ -3,12 +3,12 @@ name: Multi-Stage Homelab Deployment
 on:
   push:
     branches:
-      - '**'
+      - main
+      - dev
   workflow_dispatch:
 
 jobs:
   deploy-dev:
-    if: github.ref_name != 'main'
     runs-on: self-hosted
     steps:
       - name: Checkout code
@@ -16,26 +16,36 @@ jobs:
 
       - name: Stop old dev container
         run: |
-          docker stop go-api-dev || true
-          docker rm go-api-dev || true
+          docker stop onelab-api-dev || true
+          docker rm onelab-api-dev || true
 
       - name: Build dev image
-        run: docker build -t go-api:dev .
+        run: docker build -t onelab-api:dev .
 
       - name: Start dev container
+        env:
+          SECRET_NC_USER: ${{ secrets.DEV_NEXTCLOUD_USER }}
+          SECRET_NC_PASS: ${{ secrets.DEV_NEXTCLOUD_PASSWORD }}
+          SECRET_PL_TOKEN: ${{ secrets.DEV_PAPERLESS_TOKEN }}
+          SECRET_NC_BASE_URL: ${{ secrets.ONELAB_NEXTCLOUD_BASE_URL }}
+          SECRET_PL_BASE_URL: ${{ secrets.ONELAB_PAPERLESS_BASE_URL }}
         run: |
           docker run -d \
-            --name go-api-dev \
+            --name onelab-api-dev \
             --restart always \
             -p 8090:8080 \
-            go-api:dev
-
+            -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
+            -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
+            -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
+            -e ONELAB_NEXTCLOUD_BASE_URL="$SECRET_NC_BASE_URL" \
+            -e ONELAB_PAPERLESS_BASE_URL="$SECRET_PL_BASE_URL" \
+            onelab-api:dev
       - name: Cleanup
         run: docker image prune -f
 
   gatecheck-prod:
     needs: deploy-dev
-    if: github.ref_name == 'main'
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -58,19 +68,30 @@ jobs:
 
       - name: Stop old prod container
         run: |
-          docker stop go-api-prod || true
-          docker rm go-api-prod || true
+          docker stop onelab-api-prod || true
+          docker rm onelab-api-prod || true
 
       - name: Build prod image
-        run: docker build -t go-api:prod .
+        run: docker build -t onelab-api:prod .
 
       - name: Start prod container
+        env:
+          SECRET_NC_USER: ${{ secrets.PROD_NEXTCLOUD_USER }}
+          SECRET_NC_PASS: ${{ secrets.PROD_NEXTCLOUD_PASSWORD }}
+          SECRET_PL_TOKEN: ${{ secrets.PROD_PAPERLESS_TOKEN }}
+          SECRET_NC_BASE_URL: ${{ secrets.ONELAB_NEXTCLOUD_BASE_URL }}
+          SECRET_PL_BASE_URL: ${{ secrets.ONELAB_PAPERLESS_BASE_URL }}
         run: |
           docker run -d \
-            --name go-api-prod \
+            --name onelab-api-prod \
             --restart always \
             -p 8080:8080 \
-            go-api:prod
+            -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
+            -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
+            -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
+            -e ONELAB_NEXTCLOUD_BASE_URL="$SECRET_NC_BASE_URL" \
+            -e ONELAB_PAPERLESS_BASE_URL="$SECRET_PL_BASE_URL" \
+            onelab-api:prod
 
       - name: Cleanup
         run: docker image prune -f
