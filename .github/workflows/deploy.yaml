@@ -23,13 +23,19 @@ jobs:
         run: docker build -t onelab-api:dev .
 
       - name: Start dev container
+        env:
+          SECRET_NC_USER: ${{ secrets.DEV_NEXTCLOUD_USER }}
+          SECRET_NC_PASS: ${{ secrets.DEV_NEXTCLOUD_PASSWORD }}
+          SECRET_PL_TOKEN: ${{ secrets.DEV_PAPERLESS_TOKEN }}
         run: |
           docker run -d \
             --name onelab-api-dev \
             --restart always \
             -p 8090:8080 \
+            -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
+            -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
+            -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
             onelab-api:dev
-
       - name: Cleanup
         run: docker image prune -f
 
@@ -65,11 +71,18 @@ jobs:
         run: docker build -t onelab-api:prod .
 
       - name: Start prod container
+        env:
+          SECRET_NC_USER: ${{ secrets.PROD_NEXTCLOUD_USER }}
+          SECRET_NC_PASS: ${{ secrets.PROD_NEXTCLOUD_PASSWORD }}
+          SECRET_PL_TOKEN: ${{ secrets.PROD_PAPERLESS_TOKEN }}
         run: |
           docker run -d \
             --name onelab-api-prod \
             --restart always \
             -p 8080:8080 \
+            -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
+            -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
+            -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
             onelab-api:prod
 
       - name: Cleanup
