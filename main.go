@@ -10,24 +10,44 @@ import (
 )
 
 type Response struct {
-	Message string `json:"message"`
-	Status  string `json:"status"`
+	Message      string            `json:"message"`
+	Status       string            `json:"status"`
+	Integrations map[string]string `json:"integrations,omitempty"`
 }
 
 func main() {
 	// Initialize Config Service
-	cfgService, err := config.NewConfigService("config.json")
+	cfgService, err := config.NewConfigService()
 	if err != nil {
 		log.Printf("Warning: Failed to load config file (falling back to defaults & env): %v", err)
 	}
 
 	mux := http.NewServeMux()
 
+	// Initialize App Controller and specify exactly what Services are available.
+	fController := fileService.NewFileController()
+
+	// Inject integrations securely configured with their base URLs and credentials from the config service
+	fController.AddIntegration("nextcloud", fileService.NewNextcloudService(
+		cfgService.GetNextcloudBaseUrl(),
+		cfgService.GetNextcloudUser(),
+		cfgService.GetNextcloudPassword(),
+	))
+	fController.AddIntegration("paperless", fileService.NewPaperlessService(
+		cfgService.GetPaperlessBaseUrl(),
+		cfgService.GetPaperlessToken(),
+	))
+
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		
+		// Check the status of all registered integrations
+		integrationStatuses := fController.CheckIntegrationsStatus(r.Context())
+		
 		res := Response{
-			Message: "OneAPI running!",
-			Status:  "OK",
+			Message:      "OneAPI running!",
+			Status:       "OK",
+			Integrations: integrationStatuses,
 		}
 		json.NewEncoder(w).Encode(res)
 	})
@@ -41,20 +61,6 @@ func main() {
 		}
 		json.NewEncoder(w).Encode(res)
 	})
-
-	// Initialize App Controller and specify exactly what Services are available.
-	fController := fileService.NewFileController()
-
-	// Inject integrations securely configured with their base URLs and credentials from the config service
-	fController.AddIntegration("nextcloud", fileService.NewNextcloudService(
-		cfgService.GetNextcloudURL(),
-		cfgService.GetNextcloudUser(),
-		cfgService.GetNextcloudPassword(),
-	))
-	fController.AddIntegration("paperless", fileService.NewPaperlessService(
-		cfgService.GetPaperlessURL(),
-		cfgService.GetPaperlessToken(),
-	))
 
 	fController.RegisterRoutes(mux)
 

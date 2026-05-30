@@ -27,6 +27,8 @@ jobs:
           SECRET_NC_USER: ${{ secrets.DEV_NEXTCLOUD_USER }}
           SECRET_NC_PASS: ${{ secrets.DEV_NEXTCLOUD_PASSWORD }}
           SECRET_PL_TOKEN: ${{ secrets.DEV_PAPERLESS_TOKEN }}
+          SECRET_NC_BASE_URL: ${{ secrets.ONELAB_NEXTCLOUD_BASE_URL }}
+          SECRET_PL_BASE_URL: ${{ secrets.ONELAB_PAPERLESS_BASE_URL }}
         run: |
           docker run -d \
             --name onelab-api-dev \
@@ -35,6 +37,8 @@ jobs:
             -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
             -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
             -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
+            -e ONELAB_NEXTCLOUD_BASE_URL="$SECRET_NC_BASE_URL" \
+            -e ONELAB_PAPERLESS_BASE_URL="$SECRET_PL_BASE_URL" \
             onelab-api:dev
       - name: Cleanup
         run: docker image prune -f
@@ -75,6 +79,8 @@ jobs:
           SECRET_NC_USER: ${{ secrets.PROD_NEXTCLOUD_USER }}
           SECRET_NC_PASS: ${{ secrets.PROD_NEXTCLOUD_PASSWORD }}
           SECRET_PL_TOKEN: ${{ secrets.PROD_PAPERLESS_TOKEN }}
+          SECRET_NC_BASE_URL: ${{ secrets.ONELAB_NEXTCLOUD_BASE_URL }}
+          SECRET_PL_BASE_URL: ${{ secrets.ONELAB_PAPERLESS_BASE_URL }}
         run: |
           docker run -d \
             --name onelab-api-prod \
@@ -83,6 +89,8 @@ jobs:
             -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
             -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
             -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
+            -e ONELAB_NEXTCLOUD_BASE_URL="$SECRET_NC_BASE_URL" \
+            -e ONELAB_PAPERLESS_BASE_URL="$SECRET_PL_BASE_URL" \
             onelab-api:prod
 
       - name: Cleanup

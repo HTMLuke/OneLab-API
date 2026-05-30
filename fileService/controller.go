@@ -1,6 +1,7 @@
 package fileService
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 )
@@ -46,6 +47,19 @@ func (c *FileController) TransferHandler(w http.ResponseWriter, r *http.Request)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf("File %s successfully transferred to %s\n", header.Filename, targetSoft)))
+}
+
+// CheckIntegrationsStatus verifies the connectivity of all registered integrations.
+func (c *FileController) CheckIntegrationsStatus(ctx context.Context) map[string]string {
+	statusMap := make(map[string]string)
+	for name, svc := range c.integrations {
+		if err := svc.CheckStatus(ctx); err != nil {
+			statusMap[name] = fmt.Sprintf("DOWN (%v)", err.Error())
+		} else {
+			statusMap[name] = "OK"
+		}
+	}
+	return statusMap
 }
 
 func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
