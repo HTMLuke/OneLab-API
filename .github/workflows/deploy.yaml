@@ -34,6 +34,9 @@ jobs:
             --name onelab-api-dev \
             --restart always \
             -p 8090:8080 \
+            -v /etc/ssl/certs:/etc/ssl/certs:ro \
+            -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+            -e SSL_CERT_DIR=/etc/ssl/certs \
             -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
             -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
             -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
@@ -86,6 +89,9 @@ jobs:
             --name onelab-api-prod \
             --restart always \
             -p 8080:8080 \
+            -v /etc/ssl/certs:/etc/ssl/certs:ro \
+            -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+            -e SSL_CERT_DIR=/etc/ssl/certs \
             -e ONELAB_NEXTCLOUD_USER="$SECRET_NC_USER" \
             -e ONELAB_NEXTCLOUD_PASSWORD="$SECRET_NC_PASS" \
             -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \

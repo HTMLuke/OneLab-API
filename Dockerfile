@@ -6,6 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /onelab-api .
 
 FROM alpine:latest
+RUN apk add --no-cache ca-certificates
 RUN adduser -D appuser
 USER appuser
 WORKDIR /
