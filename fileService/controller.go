@@ -2,8 +2,10 @@ package fileService
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 type FileController struct {
@@ -22,13 +24,58 @@ func (c *FileController) AddIntegration(name string, service IntegrationService)
 	c.integrations[name] = service
 }
 
-func (c *FileController) TransferHandler(w http.ResponseWriter, r *http.Request) {
-	// Using Go 1.22+ PathValue to extract the targeted software
-	targetSoft := r.PathValue("target")
+// decodeJSON is a general helper to parse a JSON request body into a provided object
+func decodeJSON(r *http.Request, v any) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+func (c *FileController) GetValueFromKey(r *http.Request, key string) (string, error) {
+	var bodyMap map[string]interface{}
+	if err := decodeJSON(r, &bodyMap); err != nil {
+		return "", err
+	}
+	if value, exists := bodyMap[key]; exists {
+		if str, ok := value.(string); ok {
+			return str, nil
+		}
+	}
+	return "", fmt.Errorf("key '%s' not found or not a string", key)
+}
 
+func (c *FileController) TransferHandler(w http.ResponseWriter, r *http.Request) {
+	var targetSoft string
+	var sourceSoft string
+
+	targetSoft, err := c.GetValueFromKey(r, "target")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error retrieving target: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if targetSoft == "" {
+		http.Error(w, "Target field 'target' is missing in the request body", http.StatusBadRequest)
+		return
+	}
+	targetSoft = strings.ToLower(targetSoft)
 	svc, exists := c.integrations[targetSoft]
 	if !exists {
 		http.Error(w, fmt.Sprintf("Target software '%s' is not supported", targetSoft), http.StatusBadRequest)
+		return
+	}
+
+	sourceSoft, err = c.GetValueFromKey(r, "source")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error retrieving source: %v", err), http.StatusBadRequest)
+		return
+	}
+	if sourceSoft == "" {
+		http.Error(w, "Source field 'source' is missing in the request body", http.StatusBadRequest)
+		return
+	}
+
+	sourceSoft = strings.ToLower(sourceSoft)
+	sourceExists := c.integrations[sourceSoft] != nil
+	if !sourceExists {
+		http.Error(w, fmt.Sprintf("Source software '%s' is not supported", sourceSoft), http.StatusBadRequest)
 		return
 	}
 
@@ -63,6 +110,5 @@ func (c *FileController) CheckIntegrationsStatus(ctx context.Context) map[string
 }
 
 func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
-	// e.g. POST /api/v1/files/transfer/nextcloud
-	mux.HandleFunc("POST /api/v1/files/transfer/{target}", c.TransferHandler)
+	mux.HandleFunc("POST /api/v1/files/transfer", c.TransferHandler)
 }
