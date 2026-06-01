@@ -68,13 +68,17 @@ func (c *FileController) TransferHandler(w http.ResponseWriter, r *http.Request)
 	defer file.Close()
 
 	// Let the specific integration handle the logic
-	if err := svc.TransferFile(r.Context(), file, header); err != nil {
-		http.Error(w, fmt.Sprintf("Transfer to %s failed", targetSoft), http.StatusInternalServerError)
-		return
-	}
+	if transferer, ok := svc.(FileTransferer); ok {
+		if err := transferer.TransferFile(r.Context(), file, header); err != nil {
+			http.Error(w, fmt.Sprintf("Transfer to %s failed", targetSoft), http.StatusInternalServerError)
+			return
+		}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("File %s successfully transferred to %s\n", header.Filename, targetSoft)))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("File %s successfully transferred to %s\n", header.Filename, targetSoft)))
+	} else {
+		http.Error(w, fmt.Sprintf("File transfer not supported for target '%s'", targetSoft), http.StatusBadRequest)
+	}
 }
 
 // CheckIntegrationsStatus verifies the connectivity of all registered integrations.
@@ -110,16 +114,21 @@ func (c *FileController) LookupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := svc.LookupFile(r.Context(), filename)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error looking up file from %s: %v", sourceSoft, err), http.StatusInternalServerError)
-		return
-	}
+	// Check if the service implements the FileLookuper interface
+	if lookuper, ok := svc.(FileLookuper); ok {
+		result, err := lookuper.LookupFile(r.Context(), filename)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error looking up file from %s: %v", sourceSoft, err), http.StatusInternalServerError)
+			return
+		}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(result); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
-		return
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, fmt.Sprintf("Lookup not supported for source '%s'", sourceSoft), http.StatusBadRequest)
 	}
 }
 func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
