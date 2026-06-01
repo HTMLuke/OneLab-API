@@ -40,10 +40,10 @@ func main() {
 
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		
+
 		// Check the status of all registered integrations
 		integrationStatuses := fController.CheckIntegrationsStatus(r.Context())
-		
+
 		res := Response{
 			Message:      "OneAPI running!",
 			Status:       "OK",

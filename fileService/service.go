@@ -10,4 +10,5 @@ import (
 type IntegrationService interface {
 	TransferFile(ctx context.Context, file multipart.File, header *multipart.FileHeader) error
 	CheckStatus(ctx context.Context) error
+	LookupFile(ctx context.Context, filename string) (any, error)
 }

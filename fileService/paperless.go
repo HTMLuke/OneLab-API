@@ -31,6 +31,11 @@ func (s *PaperlessService) TransferFile(ctx context.Context, file multipart.File
 	return nil
 }
 
+func (s *PaperlessService) LookupFile(ctx context.Context, filename string) (any, error) {
+	// TODO: Implement Paperless-ngx file lookup logic here.
+	return nil, fmt.Errorf("LookupFile not implemented yet for Paperless")
+}
+
 func (s *PaperlessService) CheckStatus(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", s.checkURL, nil)
 	if err != nil {
