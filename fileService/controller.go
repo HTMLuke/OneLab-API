@@ -1,9 +1,11 @@
 package fileService
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -30,16 +32,40 @@ func decodeJSON(r *http.Request, v any) error {
 }
 
 func (c *FileController) GetValueFromBody(r *http.Request, key string) (string, error) {
-	var bodyMap map[string]interface{}
-	if err := decodeJSON(r, &bodyMap); err != nil {
+	// Is Body even there
+	if r.Body == nil {
+		return "", fmt.Errorf("request body is nil")
+	}
+
+	// Read complete body into bytes
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
 		return "", err
 	}
+
+	// We add the body back to the request so it can be read again later if needed (e.g., for file transfer)
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// Check if body is empty
+	if len(bodyBytes) == 0 {
+		return "", fmt.Errorf("request body is empty")
+	}
+
+	// Parse body as JSON into a map
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &bodyMap); err != nil {
+		return "", fmt.Errorf("failed to decode JSON: %v", err)
+	}
+
+	//return the value for the specified key if it exists and is a string
 	if value, exists := bodyMap[key]; exists {
 		if str, ok := value.(string); ok {
 			return str, nil
 		}
+		return "", fmt.Errorf("key '%s' exists but is not a string", key)
 	}
-	return "", fmt.Errorf("key '%s' not found or not a string", key)
+
+	return "", fmt.Errorf("key '%s' not found in body", key)
 }
 
 func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string, error) {
@@ -50,18 +76,18 @@ func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string,
 	return value, nil
 }
 func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Request) {
-	source, err := c.GetValueFromQuery(r, "source")
+	source, err := c.GetValueFromBody(r, "source")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
-	target, err := c.GetValueFromQuery(r, "target")
+	target, err := c.GetValueFromBody(r, "target")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("target query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	filename, err := c.GetValueFromQuery(r, "filename")
+	filename, err := c.GetValueFromBody(r, "filename")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("filename query parameter is required: %v", err), http.StatusBadRequest)
 		return
@@ -168,7 +194,6 @@ func (c *FileController) LookupHandler(svc IntegrationService, filename string, 
 	}
 }
 func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
-	// e.g. POST /api/v1/files/transfer/nextcloud
-	mux.HandleFunc("POST /api/v1/files/transfer/{target}", c.HTTPLookupHandler)
+	mux.HandleFunc("POST /api/v1/files/transfer/", c.HTTPTransferHandler)
 	mux.HandleFunc("GET /api/v1/files/lookup/", c.HTTPLookupHandler)
 }
