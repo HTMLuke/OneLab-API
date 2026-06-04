@@ -26,11 +26,6 @@ func (c *FileController) AddIntegration(name string, service IntegrationService)
 	c.integrations[name] = service
 }
 
-// decodeJSON is a general helper to parse a JSON request body into a provided object
-func decodeJSON(r *http.Request, v any) error {
-	return json.NewDecoder(r.Body).Decode(v)
-}
-
 func (c *FileController) GetValueFromBody(r *http.Request, key string) (string, error) {
 	// Is Body even there
 	if r.Body == nil {
