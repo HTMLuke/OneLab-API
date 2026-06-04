@@ -8,13 +8,18 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+
+	"github.com/HTMLuke/OneLab-API/config"
+	"github.com/HTMLuke/OneLab-API/secretProvider"
 )
 
 // NextcloudService handles sending files to Nextcloud.
 type NextcloudService struct {
-	apiLookupUrl string
-	username     string
-	password     string
+	apiLookupUrl  string
+	username      string
+	password      string
+	cnfService    config.ConfigService
+	secretService secretProvider.SecretService
 }
 
 type NextcloudFileMetadata struct {
@@ -62,12 +67,16 @@ type NextcloudSearchResponse struct {
 	} `json:"ocs"`
 }
 
-func NewNextcloudService(baseURL, username, password string) *NextcloudService {
-	apiLookup, _ := url.JoinPath(baseURL, "ocs/v2.php/search/providers/files/search")
+func NewNextcloudService(cnf config.ConfigService, secretService secretProvider.SecretService) *NextcloudService {
+	apiLookup, _ := url.JoinPath(cnf.GetNextcloudBaseUrl(), "ocs/v2.php/search/providers/files/search")
+	username := secretService.GetNextcloudUser()
+	password := secretService.GetNextcloudPassword()
 	return &NextcloudService{
-		apiLookupUrl: apiLookup,
-		username:     username,
-		password:     password,
+		apiLookupUrl:  apiLookup,
+		username:      username,
+		password:      password,
+		cnfService:    cnf,
+		secretService: secretService,
 	}
 }
 
