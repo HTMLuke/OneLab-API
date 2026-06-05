@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 
@@ -16,6 +15,8 @@ import (
 // NextcloudService handles sending files to Nextcloud.
 type NextcloudService struct {
 	apiLookupUrl  string
+	apiAddUrl     string
+	apiGetUrl     string
 	username      string
 	password      string
 	cnfService    config.ConfigService
@@ -69,10 +70,14 @@ type NextcloudSearchResponse struct {
 
 func NewNextcloudService(cnf config.ConfigService, secretService secretProvider.SecretService) *NextcloudService {
 	apiLookup, _ := url.JoinPath(cnf.GetNextcloudBaseUrl(), "ocs/v2.php/search/providers/files/search")
+	apiAdd, _ := url.JoinPath(cnf.GetNextcloudBaseUrl(), "remote.php/dav/files/")
+	apiGet, _ := url.JoinPath(cnf.GetNextcloudBaseUrl(), "remote.php/dav/files/")
 	username := secretService.GetNextcloudUser()
 	password := secretService.GetNextcloudPassword()
 	return &NextcloudService{
 		apiLookupUrl:  apiLookup,
+		apiAddUrl:     apiAdd,
+		apiGetUrl:     apiGet,
 		username:      username,
 		password:      password,
 		cnfService:    cnf,
@@ -80,13 +85,57 @@ func NewNextcloudService(cnf config.ConfigService, secretService secretProvider.
 	}
 }
 
-func (s *NextcloudService) TransferFile(ctx context.Context, file multipart.File, header *multipart.FileHeader) error {
-	// TODO: Implement Nextcloud WebDAV or API upload logic here.
-	fmt.Printf("Transferring file '%s' to Nextcloud at %s\n", header.Filename, s.apiLookupUrl)
-	return nil
+func (s *NextcloudService) AddFile(ctx context.Context, file []byte, filename string) error {
+	return fmt.Errorf("AddFile not implemented yet for Nextcloud")
+}
+func (s *NextcloudService) GetFile(ctx context.Context, filePath string) ([]byte, error) {
+	// Build url to: .../remote.php/dav/files/USERNAME/?X-File-Id=12345
+	userURL, err := url.JoinPath(s.apiGetUrl, s.username)
+	fullURL, err := url.JoinPath(userURL, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build URL: %v", err)
+	}
+
+	// add quersy parameter to URL
+	u, err := url.Parse(fullURL)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	u.RawQuery = q.Encode()
+
+	// create request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// set basic auth header
+	req.SetBasicAuth(s.username, s.password)
+
+	// send request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// error handling for non-success status codes
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed: received status code %d, response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// save file content into bytes
+	fileData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file content: %v", err)
+	}
+
+	// return file content as bytes (or you could return an io.Reader or any other format depending on your needs)
+	return fileData, nil
 }
 func (s *NextcloudService) LookupFile(ctx context.Context, filename string) (any, error) {
-	// TODO: Implement Nextcloud file lookup logic here.
 	req, err := http.NewRequestWithContext(ctx, "GET", s.apiLookupUrl, nil)
 	if err != nil {
 		return nil, err

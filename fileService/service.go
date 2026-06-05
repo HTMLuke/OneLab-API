@@ -9,6 +9,8 @@ import (
 // Every registered integration MUST at least support checking its connectivity status.
 type IntegrationService interface {
 	CheckStatus(ctx context.Context) error
+	GetFile(ctx context.Context, fileID string) ([]byte, error)
+	AddFile(ctx context.Context, file []byte, filename string) error
 }
 
 // FileTransferer is an optional interface.

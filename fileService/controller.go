@@ -109,10 +109,36 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename string, ctx context.Context) (error, int) {
-
-	_, err, statusCode := c.LookupHandler(svc, filename, ctx) // Reuse the lookup handler to validate the file exists before transfer
+	var fileID string
+	foundFiles, err, statusCode := c.LookupHandler(svc, filename, ctx) // Reuse the lookup handler to validate the file exists before transfer
 	if err != nil {
 		return err, statusCode
+	}
+
+	// Check if foundFiles is a slice and has more than one element using reflection
+	switch files := foundFiles.(type) {
+	case []NextcloudFileResponse:
+
+		if len(files) == 0 {
+			return fmt.Errorf("file '%s' not found in source", filename), http.StatusNotFound
+		}
+		if len(files) > 1 {
+			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
+		}
+		fileID = files[0].Path
+
+	default:
+		return fmt.Errorf("unsupported response type from source lookup"), http.StatusInternalServerError
+	}
+
+	file, err := svc.GetFile(ctx, fileID)
+	if err != nil {
+		return fmt.Errorf("error retrieving file content: %v", err), http.StatusInternalServerError
+	}
+
+	err = tvc.AddFile(ctx, file, filename)
+	if err != nil {
+		return fmt.Errorf("error adding file to target: %v", err), http.StatusInternalServerError
 	}
 	return nil, http.StatusOK
 	// Let the specific integration handle the logic
