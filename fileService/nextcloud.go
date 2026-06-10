@@ -1,12 +1,14 @@
 package fileService
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/HTMLuke/OneLab-API/config"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
@@ -86,7 +88,49 @@ func NewNextcloudService(cnf config.ConfigService, secretService secretProvider.
 }
 
 func (s *NextcloudService) AddFile(ctx context.Context, file []byte, filename string) error {
-	return fmt.Errorf("AddFile not implemented yet for Nextcloud")
+	// Build the full WebDAV destination URL: .../remote.php/dav/files/USERNAME/filename
+	cleanFilename, err := url.PathUnescape(filename)
+	if err != nil {
+		return fmt.Errorf("failed to unescape filename: %v", err)
+	}
+
+	// 2. CRITICAL: Replace slashes with a filesystem-safe character (e.g., a hyphen)
+	// Nextcloud/Linux filesystems cannot have "/" in a filename.
+	cleanFilename = strings.ReplaceAll(cleanFilename, "/", "∕")  // Slash -> Division Slash
+	cleanFilename = strings.ReplaceAll(cleanFilename, "\\", "⧵") // Backslash -> Reverse Solidus
+	cleanFilename = strings.ReplaceAll(cleanFilename, ":", "∶")  // Colon -> Ratio Symbol
+	cleanFilename = strings.ReplaceAll(cleanFilename, "?", "？")  // Question mark -> Fullwidth Question Mark
+	cleanFilename = strings.ReplaceAll(cleanFilename, "*", "⁎")  // Asterisk -> Low Asterisk
+
+	// 3. Build the URL cleanly using url.JoinPath
+	targetURL, err := url.JoinPath(s.apiAddUrl, s.username, cleanFilename)
+	if err != nil {
+		return fmt.Errorf("failed to construct WebDAV URL: %v", err)
+	}
+	// Create a PUT request, passing the file byte slice as an io.Reader
+	req, err := http.NewRequestWithContext(ctx, "PUT", targetURL, bytes.NewReader(file))
+	if err != nil {
+		return fmt.Errorf("failed to create PUT request: %v", err)
+	}
+
+	//  Set basic authentication headers
+	req.SetBasicAuth(s.username, s.password)
+
+	// Send the request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute PUT request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Handle Nextcloud/WebDAV responses
+	// WebDAV usually returns 201 (Created) for new files or 204 (No Content) if overwriting
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload failed: received status code %d, response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
 }
 func (s *NextcloudService) GetFile(ctx context.Context, filePath string) ([]byte, error) {
 	// Build url to: .../remote.php/dav/files/USERNAME/?X-File-Id=12345

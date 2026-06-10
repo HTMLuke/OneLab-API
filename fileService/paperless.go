@@ -3,6 +3,7 @@ package fileService
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -17,9 +18,52 @@ import (
 type PaperlessService struct {
 	checkURL      string
 	addUrl        string
+	getUrl        string
+	apiLookupUrl  string
 	token         string
 	cnfService    config.ConfigService
 	secretService secretProvider.SecretService
+}
+
+type PaperlessFileMetadata struct {
+	ID                  int     `json:"id"`
+	Correspondent       int     `json:"correspondent"`
+	DocumentType        int     `json:"document_type"`
+	StoragePath         *string `json:"storage_path"`
+	Title               string  `json:"title"`
+	Content             string  `json:"content"`
+	Tags                []int   `json:"tags"`
+	Created             string  `json:"created"`
+	CreatedDate         string  `json:"created_date"`
+	Modified            string  `json:"modified"`
+	Added               string  `json:"added"`
+	DeletedAt           *string `json:"deleted_at"`
+	ArchiveSerialNumber *string `json:"archive_serial_number"`
+	OriginalFileName    string  `json:"original_file_name"`
+	ArchivedFileName    string  `json:"archived_file_name"`
+	Owner               int     `json:"owner"`
+	UserCanChange       bool    `json:"user_can_change"`
+	IsSharedByRequester bool    `json:"is_shared_by_requester"`
+	Notes               []any   `json:"notes"`
+	CustomFields        []any   `json:"custom_fields"`
+	PageCount           int     `json:"page_count"`
+	MimeType            string  `json:"mime_type"`
+}
+
+type PaperlessFileResponse struct {
+	ID               int    `json:"id"`
+	Title            string `json:"title"`
+	OriginalFileName string `json:"original_file_name"`
+	Created          string `json:"created"`
+	PageCount        int    `json:"page_count"`
+}
+
+type PaperlessSearchResponse struct {
+	Count    int                     `json:"count"`
+	Next     *string                 `json:"next"`
+	Previous *string                 `json:"previous"`
+	All      []int                   `json:"all"`
+	Results  []PaperlessFileMetadata `json:"results"`
 }
 
 func NewPaperlessService(cfgService config.ConfigService, secretService secretProvider.SecretService) *PaperlessService {
@@ -27,10 +71,14 @@ func NewPaperlessService(cfgService config.ConfigService, secretService secretPr
 	token := secretService.GetPaperlessToken()
 	checkURL, _ := url.JoinPath(baseURL, "api/documents/")
 	addUrl, _ := url.JoinPath(baseURL, "api/documents/post_document/")
+	getUrl, _ := url.JoinPath(baseURL, "api/documents/")
+	apiLookupUrl, _ := url.JoinPath(baseURL, "api/documents/")
 	return &PaperlessService{
 		checkURL:      checkURL,
 		addUrl:        addUrl,
+		getUrl:        getUrl,
 		token:         token,
+		apiLookupUrl:  apiLookupUrl,
 		cnfService:    cfgService,
 		secretService: secretService,
 	}
@@ -89,13 +137,80 @@ func (s *PaperlessService) AddFile(ctx context.Context, file []byte, filename st
 	return nil
 }
 func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, error) {
-	return nil, fmt.Errorf("GetFile not implemented yet for Paperless")
+	// Build the download URL: .../api/documents/{id}/download/
+	downloadPath, err := url.JoinPath(s.apiLookupUrl, fileID, "download/")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build download URL: %v", err)
+	}
+	//create request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", downloadPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set required headers
+	if s.token != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Token %s", s.token))
+	}
+
+	//  Send the request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send download request to paperless: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Handle non-success HTTP statuses
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("paperless download failed: status %d, response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Read the raw file binary data into a byte slice
+	fileData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read paperless file content: %v", err)
+	}
+
+	return fileData, nil
 }
 func (s *PaperlessService) LookupFile(ctx context.Context, filename string) (any, error) {
-	// TODO: Implement Paperless-ngx file lookup logic here.
-	return nil, fmt.Errorf("LookupFile not implemented yet for Paperless")
-}
+	req, err := http.NewRequestWithContext(ctx, "GET", s.apiLookupUrl, nil)
+	if err != nil {
+		return nil, err
+	}
 
+	q := req.URL.Query()
+	q.Add("title__icontains", filename)
+	req.URL.RawQuery = q.Encode()
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", s.token))
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed: received status code %d, response: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var searchResp PaperlessSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, fmt.Errorf("failed to decode paperless lookup response: %v", err)
+	}
+	var results []PaperlessFileResponse
+	for _, entry := range searchResp.Results {
+		results = append(results, PaperlessFileResponse{
+			ID:               entry.ID,
+			Title:            entry.Title,
+			OriginalFileName: entry.OriginalFileName,
+			Created:          entry.Created,
+			PageCount:        entry.PageCount,
+		})
+	}
+	return results, nil
+}
 func (s *PaperlessService) CheckStatus(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", s.checkURL, nil)
 	if err != nil {

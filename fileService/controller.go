@@ -126,7 +126,14 @@ func (c *FileController) TransferHandler(svc IntegrationService, tvc Integration
 			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
 		}
 		fileID = files[0].Path
-
+	case []PaperlessFileResponse:
+		if len(files) == 0 {
+			return fmt.Errorf("file '%s' not found in source", filename), http.StatusNotFound
+		}
+		if len(files) > 1 {
+			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
+		}
+		fileID = fmt.Sprintf("%d", files[0].ID)
 	default:
 		return fmt.Errorf("unsupported response type from source lookup"), http.StatusInternalServerError
 	}
