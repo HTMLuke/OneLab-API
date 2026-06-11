@@ -148,17 +148,6 @@ func (c *FileController) TransferHandler(svc IntegrationService, tvc Integration
 		return fmt.Errorf("error adding file to target: %v", err), http.StatusInternalServerError
 	}
 	return nil, http.StatusOK
-	// Let the specific integration handle the logic
-	// if transferer, ok := svc.(FileTransferer); ok {
-	// 	if err := transferer.TransferFile(ctx, nil, nil); err != nil {
-	// 		return fmt.Errorf("Transfer failed: %w", err), http.StatusInternalServerError
-	// 	}else {
-	// 		return nil, http.StatusOK
-	// 	}
-
-	// } else {
-	// 	return fmt.Errorf("File transfer not supported for target"), http.StatusBadRequest
-	// }
 }
 
 // CheckIntegrationsStatus verifies the connectivity of all registered integrations.
@@ -225,3 +214,4 @@ func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/files/transfer/", c.HTTPTransferHandler)
 	mux.HandleFunc("GET /api/v1/files/lookup/", c.HTTPLookupHandler)
 }
+

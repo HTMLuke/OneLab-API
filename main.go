@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/HTMLuke/OneLab-API/auth"
 	"github.com/HTMLuke/OneLab-API/config"
 	"github.com/HTMLuke/OneLab-API/fileService"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
@@ -24,6 +25,18 @@ func main() {
 	}
 	secretService := secretProvider.NewSecretService()
 	mux := http.NewServeMux()
+
+	// Initialize Auth Controller
+	authController := auth.NewAuthController()
+
+	authController.AddIntegration("jwt", auth.NewJwtService(
+		cfgService.GetAuthTokenExpiry(),
+		cfgService.GetJwtSecret(),
+		cfgService.GetAuthClientID(),
+		cfgService.GetAuthClientSecret(),
+	))
+
+	authController.RegisterRoutes(mux)
 
 	// Initialize App Controller and specify exactly what Services are available.
 	fController := fileService.NewFileController()
