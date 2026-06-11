@@ -69,7 +69,7 @@ func main() {
 		json.NewEncoder(w).Encode(res)
 	})
 
-	fController.RegisterRoutes(mux)
+	fController.RegisterRoutes(mux, authController.Middleware)
 
 	log.Println("Server starting on port 8080...")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
