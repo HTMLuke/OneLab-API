@@ -1,9 +1,11 @@
 package fileService
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -24,22 +26,41 @@ func (c *FileController) AddIntegration(name string, service IntegrationService)
 	c.integrations[name] = service
 }
 
-// decodeJSON is a general helper to parse a JSON request body into a provided object
-func decodeJSON(r *http.Request, v any) error {
-	return json.NewDecoder(r.Body).Decode(v)
-}
-
 func (c *FileController) GetValueFromBody(r *http.Request, key string) (string, error) {
-	var bodyMap map[string]interface{}
-	if err := decodeJSON(r, &bodyMap); err != nil {
+	// Is Body even there
+	if r.Body == nil {
+		return "", fmt.Errorf("request body is nil")
+	}
+
+	// Read complete body into bytes
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
 		return "", err
 	}
+
+	// We add the body back to the request so it can be read again later if needed (e.g., for file transfer)
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// Check if body is empty
+	if len(bodyBytes) == 0 {
+		return "", fmt.Errorf("request body is empty")
+	}
+
+	// Parse body as JSON into a map
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &bodyMap); err != nil {
+		return "", fmt.Errorf("failed to decode JSON: %v", err)
+	}
+
+	//return the value for the specified key if it exists and is a string
 	if value, exists := bodyMap[key]; exists {
 		if str, ok := value.(string); ok {
 			return str, nil
 		}
+		return "", fmt.Errorf("key '%s' exists but is not a string", key)
 	}
-	return "", fmt.Errorf("key '%s' not found or not a string", key)
+
+	return "", fmt.Errorf("key '%s' not found in body", key)
 }
 
 func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string, error) {
@@ -49,36 +70,84 @@ func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string,
 	}
 	return value, nil
 }
-
-func (c *FileController) TransferHandler(w http.ResponseWriter, r *http.Request) {
-	// Using Go 1.22+ PathValue to extract the targeted software
-	targetSoft := r.PathValue("target")
-
-	svc, exists := c.integrations[targetSoft]
-	if !exists {
-		http.Error(w, fmt.Sprintf("Target software '%s' is not supported", targetSoft), http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
+func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Request) {
+	source, err := c.GetValueFromBody(r, "source")
 	if err != nil {
-		http.Error(w, "Error retrieving the file", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
-
-	// Let the specific integration handle the logic
-	if transferer, ok := svc.(FileTransferer); ok {
-		if err := transferer.TransferFile(r.Context(), file, header); err != nil {
-			http.Error(w, fmt.Sprintf("Transfer to %s failed", targetSoft), http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf("File %s successfully transferred to %s\n", header.Filename, targetSoft)))
-	} else {
-		http.Error(w, fmt.Sprintf("File transfer not supported for target '%s'", targetSoft), http.StatusBadRequest)
+	target, err := c.GetValueFromBody(r, "target")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("target query parameter is required: %v", err), http.StatusBadRequest)
+		return
 	}
+
+	filename, err := c.GetValueFromBody(r, "filename")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("filename query parameter is required: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	tvc, exists := c.integrations[target]
+	if !exists {
+		http.Error(w, fmt.Sprintf("Target software '%s' is not supported", target), http.StatusBadRequest)
+		return
+	}
+
+	svc, exists := c.integrations[source]
+	if !exists {
+		http.Error(w, fmt.Sprintf("Source software '%s' is not supported", source), http.StatusBadRequest)
+		return
+	}
+	err, statusCode := c.TransferHandler(svc, tvc, filename, r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error transferring file: %v", err), statusCode)
+		return
+	} else {
+		w.WriteHeader(statusCode)
+		return
+	}
+}
+func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename string, ctx context.Context) (error, int) {
+	var fileID string
+	foundFiles, err, statusCode := c.LookupHandler(svc, filename, ctx) // Reuse the lookup handler to validate the file exists before transfer
+	if err != nil {
+		return err, statusCode
+	}
+
+	// Check if foundFiles is a slice and has more than one element using reflection
+	switch files := foundFiles.(type) {
+	case []NextcloudFileResponse:
+
+		if len(files) == 0 {
+			return fmt.Errorf("file '%s' not found in source", filename), http.StatusNotFound
+		}
+		if len(files) > 1 {
+			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
+		}
+		fileID = files[0].Path
+	case []PaperlessFileResponse:
+		if len(files) == 0 {
+			return fmt.Errorf("file '%s' not found in source", filename), http.StatusNotFound
+		}
+		if len(files) > 1 {
+			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
+		}
+		fileID = fmt.Sprintf("%d", files[0].ID)
+	default:
+		return fmt.Errorf("unsupported response type from source lookup"), http.StatusInternalServerError
+	}
+
+	file, err := svc.GetFile(ctx, fileID)
+	if err != nil {
+		return fmt.Errorf("error retrieving file content: %v", err), http.StatusInternalServerError
+	}
+
+	err = tvc.AddFile(ctx, file, filename)
+	if err != nil {
+		return fmt.Errorf("error adding file to target: %v", err), http.StatusInternalServerError
+	}
+	return nil, http.StatusOK
 }
 
 // CheckIntegrationsStatus verifies the connectivity of all registered integrations.
@@ -93,46 +162,56 @@ func (c *FileController) CheckIntegrationsStatus(ctx context.Context) map[string
 	}
 	return statusMap
 }
-func (c *FileController) LookupHandler(w http.ResponseWriter, r *http.Request) {
-
+func (c *FileController) HTTPLookupHandler(w http.ResponseWriter, r *http.Request) {
 	source, err := c.GetValueFromQuery(r, "source")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	filename, err := c.GetValueFromQuery(r, "filename")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("filename query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	sourceSoft := strings.ToLower(source)
 	svc, exists := c.integrations[sourceSoft]
 	if !exists {
-		http.Error(w, fmt.Sprintf("Source software '%s' is not supported", sourceSoft), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("source software '%s' is not supported", sourceSoft), http.StatusBadRequest)
 		return
 	}
 
+	result, err, statusCode := c.LookupHandler(svc, filename, r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error looking up file from %s: %v", sourceSoft, err), statusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+}
+func (c *FileController) LookupHandler(svc IntegrationService, filename string, ctx context.Context) (any, error, int) {
+
 	// Check if the service implements the FileLookuper interface
 	if lookuper, ok := svc.(FileLookuper); ok {
-		result, err := lookuper.LookupFile(r.Context(), filename)
+		result, err := lookuper.LookupFile(ctx, filename)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Error looking up file from %s: %v", sourceSoft, err), http.StatusInternalServerError)
-			return
+			return nil, fmt.Errorf("Error looking up file from: %v", err), http.StatusInternalServerError
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(result); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
-			return
-		}
+		return result, nil, http.StatusOK
+
 	} else {
-		http.Error(w, fmt.Sprintf("Lookup not supported for source '%s'", sourceSoft), http.StatusBadRequest)
+		return nil, fmt.Errorf("lookup not supported for source"), http.StatusBadRequest
 	}
 }
 func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
-	// e.g. POST /api/v1/files/transfer/nextcloud
-	mux.HandleFunc("POST /api/v1/files/transfer/{target}", c.TransferHandler)
-	mux.HandleFunc("GET /api/v1/files/lookup/", c.LookupHandler)
+	mux.HandleFunc("POST /api/v1/files/transfer/", c.HTTPTransferHandler)
+	mux.HandleFunc("GET /api/v1/files/lookup/", c.HTTPLookupHandler)
 }
+
