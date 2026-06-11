@@ -210,8 +210,11 @@ func (c *FileController) LookupHandler(svc IntegrationService, filename string, 
 		return nil, fmt.Errorf("lookup not supported for source"), http.StatusBadRequest
 	}
 }
-func (c *FileController) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/files/transfer/", c.HTTPTransferHandler)
-	mux.HandleFunc("GET /api/v1/files/lookup/", c.HTTPLookupHandler)
-}
+func (c *FileController) RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
 
+	transferHandler := http.HandlerFunc(c.HTTPTransferHandler)
+	lookupHandler := http.HandlerFunc(c.HTTPLookupHandler)
+
+	mux.Handle("POST /api/v1/files/transfer/", authMiddleware(transferHandler))
+	mux.Handle("GET /api/v1/files/lookup/", authMiddleware(lookupHandler))
+}
