@@ -7,31 +7,30 @@ import (
 )
 
 type ConfigService interface {
-	GetNextcloudBaseUrl() string
-	GetPaperlessBaseUrl() string
-	GetNextcloudUser() string
-	GetNextcloudPassword() string
-	GetPaperlessToken() string
-	GetAuthTokenExpiry() time.Duration
-	GetJwtSecret() string
-	GetAuthClientID() string
-	GetAuthClientSecret() string
+	GetAuthExpiry() time.Duration
+	IsServiceEnabled(name string) bool
+	GetServiceURL(name string) string
+	IsAuthEnabled(name string) bool
+}
+
+// ServiceConfig is the per-service integration config from config.json
+type ServiceConfig struct {
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url"`
 }
 
 type fileConfig struct {
-	TokenExpiryHours int `json:"tokenExpiryHours"`
+	AuthExpiryHours int `json:"authExpiryHours"`
+	Integrations    struct {
+		Services map[string]ServiceConfig `json:"services"`
+		Auth     map[string]bool          `json:"auth"`
+	} `json:"integrations"`
 }
 
 type AppConfig struct {
-	NextcloudBaseUrl  string
-	PaperlessBaseUrl  string
-	NextcloudUser     string
-	NextcloudPassword string
-	PaperlessToken    string
-	AuthTokenExpiry   time.Duration
-	JwtSecret         string
-	AuthClientID      string
-	AuthClientSecret  string
+	AuthExpiry  time.Duration
+	Services    map[string]ServiceConfig
+	EnabledAuth map[string]bool
 }
 
 type configService struct {
@@ -40,41 +39,39 @@ type configService struct {
 
 func NewConfigService() (ConfigService, error) {
 	cfg := &AppConfig{
-		NextcloudBaseUrl: "http://nextcloud.local/",
-		PaperlessBaseUrl: "http://paperless.local/",
-		AuthTokenExpiry:  6 * time.Hour,
+		AuthExpiry:  6 * time.Hour,
+		Services:    map[string]ServiceConfig{},
+		EnabledAuth: map[string]bool{},
 	}
 
 	if data, err := os.ReadFile("config/config.json"); err == nil {
 		var fileCfg fileConfig
-		if err := json.Unmarshal(data, &fileCfg); err == nil && fileCfg.TokenExpiryHours > 0 {
-			cfg.AuthTokenExpiry = time.Duration(fileCfg.TokenExpiryHours) * time.Hour
+		if err := json.Unmarshal(data, &fileCfg); err == nil {
+			if fileCfg.AuthExpiryHours > 0 {
+				cfg.AuthExpiry = time.Duration(fileCfg.AuthExpiryHours) * time.Hour
+			}
+			if fileCfg.Integrations.Services != nil {
+				cfg.Services = fileCfg.Integrations.Services
+			}
+			if fileCfg.Integrations.Auth != nil {
+				cfg.EnabledAuth = fileCfg.Integrations.Auth
+			}
 		}
 	}
-
-	if url := os.Getenv("ONELAB_NEXTCLOUD_BASE_URL"); url != "" {
-		cfg.NextcloudBaseUrl = url
-	}
-	if url := os.Getenv("ONELAB_PAPERLESS_BASE_URL"); url != "" {
-		cfg.PaperlessBaseUrl = url
-	}
-
-	cfg.NextcloudUser = os.Getenv("ONELAB_NEXTCLOUD_USER")
-	cfg.NextcloudPassword = os.Getenv("ONELAB_NEXTCLOUD_PASSWORD")
-	cfg.PaperlessToken = os.Getenv("ONELAB_PAPERLESS_TOKEN")
-	cfg.JwtSecret = os.Getenv("ONELAB_JWT_SECRET")
-	cfg.AuthClientID = os.Getenv("ONELAB_AUTH_CLIENT_ID")
-	cfg.AuthClientSecret = os.Getenv("ONELAB_AUTH_CLIENT_SECRET")
 
 	return &configService{cfg: cfg}, nil
 }
 
-func (s *configService) GetNextcloudBaseUrl() string       { return s.cfg.NextcloudBaseUrl }
-func (s *configService) GetPaperlessBaseUrl() string       { return s.cfg.PaperlessBaseUrl }
-func (s *configService) GetNextcloudUser() string          { return s.cfg.NextcloudUser }
-func (s *configService) GetNextcloudPassword() string      { return s.cfg.NextcloudPassword }
-func (s *configService) GetPaperlessToken() string         { return s.cfg.PaperlessToken }
-func (s *configService) GetAuthTokenExpiry() time.Duration { return s.cfg.AuthTokenExpiry }
-func (s *configService) GetJwtSecret() string              { return s.cfg.JwtSecret }
-func (s *configService) GetAuthClientID() string           { return s.cfg.AuthClientID }
-func (s *configService) GetAuthClientSecret() string       { return s.cfg.AuthClientSecret }
+func (s *configService) GetAuthExpiry() time.Duration { return s.cfg.AuthExpiry }
+
+// IsServiceEnabled tracks whether a service integration is enabled or disabled
+// unknown names default to false
+func (s *configService) IsServiceEnabled(name string) bool { return s.cfg.Services[name].Enabled }
+
+// GetServiceURL returns the configured base URL for a service integration
+// unknown names default to ""
+func (s *configService) GetServiceURL(name string) string { return s.cfg.Services[name].URL }
+
+// IsAuthEnabled tracks whether an auth integration is enabled or disabled
+// unknown names default to false
+func (s *configService) IsAuthEnabled(name string) bool { return s.cfg.EnabledAuth[name] }
