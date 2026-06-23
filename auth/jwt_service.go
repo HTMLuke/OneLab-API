@@ -23,6 +23,7 @@ type jwtClient struct {
 	clientSecret string
 }
 
+
 func init() {
 	RegisterAuth("jwt", NewJwtService)
 }
@@ -45,8 +46,8 @@ func NewJwtService(duration time.Duration, secretService secretProvider.SecretSe
 		expirationDuration: duration,
 		jwtSecret:          []byte(jwtSecret),
 	}, nil
-}
 
+}
 func (s *jwtService) ValidateCredentials(clientID string, clientSecret string) bool {
 	c, exists := s.clients[clientID]
 	return exists && c.clientSecret == clientSecret

@@ -236,3 +236,4 @@ func (s *PaperlessService) CheckStatus(ctx context.Context) error {
 
 	return nil
 }
+
