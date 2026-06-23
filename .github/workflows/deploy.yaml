@@ -9,7 +9,8 @@ on:
 
 jobs:
   deploy-dev:
-    runs-on: self-hosted
+    if: github.ref_name == 'dev'
+    runs-on: [self-hosted, dev]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,6 +37,8 @@ jobs:
           docker run -d \
             --name onelab-api-dev \
             --restart always \
+            --label com.docker.compose.project=onelab-api \
+            --label com.docker.compose.service=dev \
             -p 8090:8080 \
             -v /etc/ssl/certs:/etc/ssl/certs:ro \
             -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
@@ -49,12 +52,12 @@ jobs:
             -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
             onelab-api:dev
+
       - name: Cleanup
         run: docker image prune -f
 
   gatecheck-prod:
-    needs: deploy-dev
-    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -70,7 +73,7 @@ jobs:
 
   deploy-prod:
     needs: gatecheck-prod
-    runs-on: self-hosted
+    runs-on: [self-hosted, prod]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -90,10 +93,15 @@ jobs:
           SECRET_PL_TOKEN: ${{ secrets.PROD_PAPERLESS_TOKEN }}
           SECRET_NC_BASE_URL: ${{ secrets.ONELAB_NEXTCLOUD_BASE_URL }}
           SECRET_PL_BASE_URL: ${{ secrets.ONELAB_PAPERLESS_BASE_URL }}
+          SECRET_JWT: ${{ secrets.PROD_JWT_SECRET }}
+          SECRET_CLIENT_ID: ${{ secrets.PROD_AUTH_CLIENT_ID }}
+          SECRET_CLIENT_SECRET: ${{ secrets.PROD_AUTH_CLIENT_SECRET }}
         run: |
           docker run -d \
             --name onelab-api-prod \
             --restart always \
+            --label com.docker.compose.project=onelab-api \
+            --label com.docker.compose.service=prod \
             -p 8080:8080 \
             -v /etc/ssl/certs:/etc/ssl/certs:ro \
             -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
@@ -103,6 +111,9 @@ jobs:
             -e ONELAB_PAPERLESS_TOKEN="$SECRET_PL_TOKEN" \
             -e ONELAB_NEXTCLOUD_BASE_URL="$SECRET_NC_BASE_URL" \
             -e ONELAB_PAPERLESS_BASE_URL="$SECRET_PL_BASE_URL" \
+            -e ONELAB_JWT_SECRET="$SECRET_JWT" \
+            -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
+            -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
             onelab-api:prod
 
       - name: Cleanup
