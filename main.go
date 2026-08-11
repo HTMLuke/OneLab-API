@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/HTMLuke/OneLab-API/auth"
 	"github.com/HTMLuke/OneLab-API/config"
 	"github.com/HTMLuke/OneLab-API/fileService"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
+	"github.com/joho/godotenv"
 )
 
 type Response struct {
@@ -18,6 +20,12 @@ type Response struct {
 }
 
 func main() {
+	if _, err := os.Stat(".env"); err == nil {
+		if err := godotenv.Load(".env"); err != nil {
+			log.Printf("Warning: failed to load .env: %v", err)
+		}
+	}
+
 	// Initialize Config Service
 	cfgService, err := config.NewConfigService()
 	if err != nil {
@@ -31,20 +39,6 @@ func main() {
 	fController := fileService.NewFileController()
 	registerIntegrations(cfgService, secretService, fController, authController)
 	authController.RegisterRoutes(mux)
-
-	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Check the status of all registered integrations
-		integrationStatuses := fController.CheckIntegrationsStatus(r.Context())
-
-		res := Response{
-			Message:      "OneAPI running!",
-			Status:       "OK",
-			Integrations: integrationStatuses,
-		}
-		json.NewEncoder(w).Encode(res)
-	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

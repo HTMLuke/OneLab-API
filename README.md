@@ -29,7 +29,8 @@ Configuration comes from two places:
 
 - **Environment variables** — secrets and per-integration connection details. See
   [`.env.example`](.env.example) for the full, current list. The app reads these directly from the
-  process environment.
+  process environment. In local development, the app also loads a `.env` file from the project
+  root when present.
 - **`config/config.json`** — non-secret settings (e.g. token expiry). Sensible defaults apply when
   the file or a value is missing.
 
