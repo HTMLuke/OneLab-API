@@ -23,7 +23,6 @@ type jwtClient struct {
 	clientSecret string
 }
 
-
 func init() {
 	RegisterAuth("jwt", NewJwtService)
 }
@@ -53,10 +52,10 @@ func (s *jwtService) ValidateCredentials(clientID string, clientSecret string) b
 	return exists && c.clientSecret == clientSecret
 }
 
-func (s *jwtService) GenerateToken(clientID string) (string, int, error) {
-	_, exists := s.clients[clientID]
-	if !exists {
-		return "", 0, errors.New("unknown client")
+func (s *jwtService) GenerateToken(clientID, clientSecret string) (string, int, error) {
+	c, exists := s.clients[clientID]
+	if !exists || c.clientSecret != clientSecret {
+		return "", 0, errInvalidCredentials
 	}
 
 	now := time.Now()

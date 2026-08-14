@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -21,8 +22,8 @@ func (c *AuthController) AddIntegration(name string, service AuthService) {
 }
 
 type tokenRequest struct {
-	ClientID     string `json:"clientId"`
-	ClientSecret string `json:"clientSecret"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 type tokenResponse struct {
 	Token     string `json:"token"`
@@ -32,19 +33,31 @@ type tokenResponse struct {
 // IssueToken authenticates the caller via clientId & clientSecret, then issues a signed token type is defined by AddIntegration
 func (c *AuthController) IssueToken(w http.ResponseWriter, r *http.Request) {
 	var req tokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
+
+	contentType := r.Header.Get("Content-Type")
+
+	// Parse the request body depending on the Content-Type header
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form data", http.StatusBadRequest)
+			return
+		}
+		req.Username = r.FormValue("username")
+		req.Password = r.FormValue("password")
+	} else {
+		// Fall back to JSON parsing by default
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
 	}
 
-	// Find the service that recognizes these credentials and let it issue the token.
 	for _, service := range c.integrations {
-		if !service.ValidateCredentials(req.ClientID, req.ClientSecret) {
-			continue
-		}
-
-		token, expiresIn, err := service.GenerateToken(req.ClientID)
+		token, expiresIn, err := service.GenerateToken(req.Username, req.Password)
 		if err != nil {
+			if errors.Is(err, errInvalidCredentials) {
+				continue
+			}
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
@@ -62,6 +75,8 @@ func (c *AuthController) IssueToken(w http.ResponseWriter, r *http.Request) {
 
 	http.Error(w, "invalid credentials", http.StatusUnauthorized)
 }
+
+var errInvalidCredentials = errors.New("invalid credentials")
 
 // Middleware validates the bearer token against all registered services.
 func (c *AuthController) Middleware(next http.Handler) http.Handler {
