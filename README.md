@@ -56,5 +56,16 @@ Send it on protected routes via `Authorization: Bearer <token>`.
 | `GET` | `/api/v1/status` | none | Per-integration connectivity |
 | `POST` | `/api/v1/auth/token` | none | Issue a signed token from client credentials |
 
+## Auth Integrations
+
+The built-in auth integrations are:
+
+- `jwt` for local signed tokens.
+- `oauth` for OAuth2 client-credentials access tokens backed by an OIDC provider such as Authentik.
+
+For `oauth`, set the provider issuer URL plus the client credentials in your environment. The
+service uses OIDC discovery when possible and validates bearer tokens by introspecting them
+against the provider's token introspection endpoint.
+
 Integration-specific routes (file transfer, lookup, etc.) are added per integration. Inspect the
 registered controllers in the source for the current set.

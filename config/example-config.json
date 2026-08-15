@@ -12,7 +12,8 @@
       }
     },
     "auth": {
-      "jwt": false
+      "jwt": false,
+      "oauth": false
     }
   }
 }
