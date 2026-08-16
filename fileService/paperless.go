@@ -9,17 +9,24 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/HTMLuke/OneLab-API/secretProvider"
+	"github.com/HTMLuke/OneLab-API/shellService"
 )
 
 // PaperlessService handles sending files to Paperless-ngx.
 type PaperlessService struct {
-	checkURL     string
-	addUrl       string
-	getUrl       string
-	apiLookupUrl string
-	token        string
+	checkURL      string
+	addUrl        string
+	getUrl        string
+	apiLookupUrl  string
+	token         string
+	dockerService shellService.ShellService
 }
 
 type PaperlessFileMetadata struct {
@@ -82,12 +89,161 @@ func NewPaperlessService(baseURL string, secretService secretProvider.SecretServ
 	getUrl, _ := url.JoinPath(baseURL, "api/documents/")
 	apiLookupUrl, _ := url.JoinPath(baseURL, "api/documents/")
 	return &PaperlessService{
-		checkURL:     checkURL,
-		addUrl:       addUrl,
-		getUrl:       getUrl,
-		token:        token,
-		apiLookupUrl: apiLookupUrl,
+		checkURL:      checkURL,
+		addUrl:        addUrl,
+		getUrl:        getUrl,
+		token:         token,
+		apiLookupUrl:  apiLookupUrl,
+		dockerService: shellService.NewDockerCmdService(),
 	}, nil
+}
+
+func findPaperlessContainerNameFromDockerPsOutput(output string) (string, error) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var candidates []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) == 0 {
+			continue
+		}
+		candidates = append(candidates, parts[0])
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no docker containers found")
+	}
+
+	for _, name := range candidates {
+		lower := strings.ToLower(name)
+		if lower == "paperless-webserver" || strings.Contains(lower, "paperless-webserver") {
+			return name, nil
+		}
+	}
+	for _, name := range candidates {
+		lower := strings.ToLower(name)
+		if strings.Contains(lower, "paperless") {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("could not determine paperless webserver container from docker ps output")
+}
+
+func (s *PaperlessService) resolveWebserverContainer(ctx context.Context) (string, error) {
+	if s.dockerService == nil {
+		return "", fmt.Errorf("docker command service is not configured")
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}\t{{.ID}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if len(output) > 0 {
+			return "", fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return "", fmt.Errorf("docker ps failed: %w", err)
+	}
+	containerName, err := findPaperlessContainerNameFromDockerPsOutput(string(output))
+	if err != nil {
+		return "", err
+	}
+	return containerName, nil
+}
+
+func (s *PaperlessService) ExportDocuments(ctx context.Context) (string, error) {
+	containerName, err := s.resolveWebserverContainer(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := s.dockerService.Execute(ctx, containerName, "mkdir -p /tmp/export"); err != nil {
+		return "", fmt.Errorf("failed to create temp export directory in container %s: %w", containerName, err)
+	}
+	if _, err := s.dockerService.Execute(ctx, containerName, `sh -c "rm -f /tmp/export/export-*.zip"`); err != nil {
+		return "", fmt.Errorf("failed to remove previous export artifacts in container %s: %w", containerName, err)
+	}
+
+	output, err := s.dockerService.Execute(ctx, containerName, "document_exporter /tmp/export -z")
+	if err != nil {
+		if output != "" {
+			return output, fmt.Errorf("paperless export failed in container %s: %w: %s", containerName, err, strings.TrimSpace(output))
+		}
+		return "", fmt.Errorf("paperless export failed in container %s: %w", containerName, err)
+	}
+	return output, nil
+}
+
+func findLatestZipInDockerExport(output string) (string, error) {
+	lines := strings.FieldsFunc(output, func(r rune) bool { return r == '\n' || r == '\r' })
+	var candidate string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasSuffix(line, ".zip") {
+			candidate = line
+		}
+	}
+	if candidate == "" {
+		return "", fmt.Errorf("no zip export file found in container output")
+	}
+	return candidate, nil
+}
+
+func (s *PaperlessService) Backup(ctx context.Context) (string, error) {
+	containerName, err := s.resolveWebserverContainer(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := s.dockerService.Execute(ctx, containerName, "mkdir -p /tmp/export"); err != nil {
+		return "", fmt.Errorf("failed to create tmp export directory in container %s: %w", containerName, err)
+	}
+	if _, err := s.dockerService.Execute(ctx, containerName, `sh -c "rm -f /tmp/export/export-*.zip"`); err != nil {
+		return "", fmt.Errorf("failed to remove stale export files in container %s: %w", containerName, err)
+	}
+
+	output, err := s.dockerService.Execute(ctx, containerName, "document_exporter /tmp/export -z")
+	if err != nil {
+		if output != "" {
+			return "", fmt.Errorf("paperless export failed in container %s: %w: %s", containerName, err, strings.TrimSpace(output))
+		}
+		return "", fmt.Errorf("paperless export failed in container %s: %w", containerName, err)
+	}
+
+	listOutput, err := s.dockerService.Execute(ctx, containerName, "sh -lc 'ls -1 /tmp/export/*.zip 2>/dev/null | tail -n 1'")
+	if err != nil {
+		return "", fmt.Errorf("failed to locate exported zip in container %s: %w", containerName, err)
+	}
+	zipPath, err := findLatestZipInDockerExport(listOutput)
+	if err != nil {
+		return "", err
+	}
+	archiveName := filepath.Base(zipPath)
+	localBackupDir := filepath.Join("/tmp", "onelab-paperless-backups")
+	if err := os.MkdirAll(localBackupDir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create local backup directory: %w", err)
+	}
+	localBackupPath := filepath.Join(localBackupDir, archiveName)
+	if _, err := os.Stat(localBackupPath); err == nil {
+		stamp := time.Now().UTC().Format("20060102-150405")
+		ext := filepath.Ext(archiveName)
+		name := strings.TrimSuffix(archiveName, ext)
+		localBackupPath = filepath.Join(localBackupDir, fmt.Sprintf("%s-%s%s", name, stamp, ext))
+	}
+
+	cpCmd := exec.CommandContext(ctx, "docker", "cp", fmt.Sprintf("%s:%s", containerName, zipPath), localBackupPath)
+	cpOutput, cpErr := cpCmd.CombinedOutput()
+	if cpErr != nil {
+		if len(cpOutput) > 0 {
+			return "", fmt.Errorf("docker cp failed: %w: %s", cpErr, strings.TrimSpace(string(cpOutput)))
+		}
+		return "", fmt.Errorf("docker cp failed: %w", cpErr)
+	}
+
+	return localBackupPath, nil
 }
 
 func (s *PaperlessService) AddFile(ctx context.Context, file []byte, filename string) error {
@@ -236,4 +392,3 @@ func (s *PaperlessService) CheckStatus(ctx context.Context) error {
 
 	return nil
 }
-
