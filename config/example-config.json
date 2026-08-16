@@ -9,6 +9,10 @@
       "paperless": {
         "enabled": false,
         "url": "http://paperless.local"
+      },
+      "dockerCmd": {
+        "enabled": false,
+        "url": "local"
       }
     },
     "auth": {
