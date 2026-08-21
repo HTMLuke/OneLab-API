@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 )
 
@@ -210,11 +211,43 @@ func (c *FileController) LookupHandler(svc IntegrationService, filename string, 
 		return nil, fmt.Errorf("lookup not supported for source"), http.StatusBadRequest
 	}
 }
+func (c *FileController) HandlePaperlessBackup(w http.ResponseWriter, r *http.Request) {
+	paperlessSvc, exists := c.integrations["paperless"]
+	if !exists {
+		http.Error(w, "paperless integration is not configured", http.StatusNotFound)
+		return
+	}
+
+	backupSvc, ok := paperlessSvc.(PaperlessBackupService)
+	if !ok {
+		http.Error(w, "paperless backup is not supported", http.StatusNotImplemented)
+		return
+	}
+
+	path, err := backupSvc.Backup(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to create paperless backup: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"status":   "ok",
+		"path":     path,
+		"filename": filepath.Base(path),
+	}); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode backup response: %v", err), http.StatusInternalServerError)
+	}
+}
+
 func (c *FileController) RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
 
 	transferHandler := http.HandlerFunc(c.HTTPTransferHandler)
 	lookupHandler := http.HandlerFunc(c.HTTPLookupHandler)
+	backupHandler := http.HandlerFunc(c.HandlePaperlessBackup)
 
 	mux.Handle("POST /api/v1/files/transfer/", authMiddleware(transferHandler))
 	mux.Handle("GET /api/v1/files/lookup/", authMiddleware(lookupHandler))
+	mux.Handle("GET /api/v1/paperless/backup", authMiddleware(backupHandler))
 }
