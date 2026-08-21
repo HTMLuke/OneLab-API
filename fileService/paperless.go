@@ -164,7 +164,7 @@ func (s *PaperlessService) ExportDocuments(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("failed to remove previous export artifacts in container %s: %w", containerName, err)
 	}
 
-	output, err := s.dockerService.Execute(ctx, containerName, "document_exporter /tmp/export -z")
+	output, err := s.dockerService.Execute(ctx, containerName, paperlessExportCommand())
 	if err != nil {
 		if output != "" {
 			return output, fmt.Errorf("paperless export failed in container %s: %w: %s", containerName, err, strings.TrimSpace(output))
@@ -172,6 +172,20 @@ func (s *PaperlessService) ExportDocuments(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("paperless export failed in container %s: %w", containerName, err)
 	}
 	return output, nil
+}
+
+func paperlessExportCommand() string {
+	return `sh -lc '
+		if [ -n "$PAPERLESS_SRC_DIR" ] && [ -f "$PAPERLESS_SRC_DIR/manage.py" ]; then
+			cd "$PAPERLESS_SRC_DIR"
+		elif [ -f /usr/src/paperless/src/manage.py ]; then
+			cd /usr/src/paperless/src
+		else
+			echo "manage.py not found for paperless export" >&2
+			exit 1
+		fi
+		python3 manage.py document_exporter /tmp/export -z
+	'`
 }
 
 func findLatestZipInDockerExport(output string) (string, error) {
@@ -205,7 +219,7 @@ func (s *PaperlessService) Backup(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to remove stale export files in container %s: %w", containerName, err)
 	}
 
-	output, err := s.dockerService.Execute(ctx, containerName, "document_exporter /tmp/export -z")
+	output, err := s.dockerService.Execute(ctx, containerName, paperlessExportCommand())
 	if err != nil {
 		if output != "" {
 			return "", fmt.Errorf("paperless export failed in container %s: %w: %s", containerName, err, strings.TrimSpace(output))

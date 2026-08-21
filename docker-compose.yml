@@ -7,17 +7,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    environment:
-      ONELAB_NEXTCLOUD_USER: ${ONELAB_NEXTCLOUD_USER:-}
-      ONELAB_NEXTCLOUD_PASSWORD: ${ONELAB_NEXTCLOUD_PASSWORD:-}
-      ONELAB_PAPERLESS_TOKEN: ${ONELAB_PAPERLESS_TOKEN:-}
-      ONELAB_NEXTCLOUD_BASE_URL: ${ONELAB_NEXTCLOUD_BASE_URL:-http://nextcloud.local/}
-      ONELAB_PAPERLESS_BASE_URL: ${ONELAB_PAPERLESS_BASE_URL:-http://paperless.local/}
-      ONELAB_JWT_SECRET: ${ONELAB_JWT_SECRET:-change-me}
-      ONELAB_AUTH_CLIENT_ID: ${ONELAB_AUTH_CLIENT_ID:-}
-      ONELAB_AUTH_CLIENT_SECRET: ${ONELAB_AUTH_CLIENT_SECRET:-}
-      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
-      SSL_CERT_DIR: /etc/ssl/certs
+    env_file:
+      - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /etc/ssl/certs:/etc/ssl/certs:ro
