@@ -2,13 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 
 	"github.com/HTMLuke/OneLab-API/auth"
 	"github.com/HTMLuke/OneLab-API/config"
 	"github.com/HTMLuke/OneLab-API/fileService"
+	"github.com/HTMLuke/OneLab-API/logging"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
 	"github.com/joho/godotenv"
 )
@@ -20,24 +20,26 @@ type Response struct {
 }
 
 func main() {
+	logger := logging.New()
+
 	if _, err := os.Stat(".env"); err == nil {
 		if err := godotenv.Load(".env"); err != nil {
-			log.Printf("Warning: failed to load .env: %v", err)
+			logger.Warn("failed to load environment file", "error", err)
 		}
 	}
 
 	// Initialize Config Service
-	cfgService, err := config.NewConfigService()
+	cfgService, err := config.NewConfigService(logger)
 	if err != nil {
-		log.Printf("Warning: Failed to load config file (falling back to defaults & env): %v", err)
+		logger.Warn("failed to load config file; using defaults and environment", "error", err)
 	}
-	secretService := secretProvider.NewSecretService()
+	secretService := secretProvider.NewSecretService(logger)
 	mux := http.NewServeMux()
 
 	// Build controllers and wire in every integration enabled in config
-	authController := auth.NewAuthController()
-	fController := fileService.NewFileController()
-	registerIntegrations(cfgService, secretService, fController, authController)
+	authController := auth.NewAuthController(logger)
+	fController := fileService.NewFileController(logger)
+	registerIntegrations(cfgService, secretService, fController, authController, logger)
 	authController.RegisterRoutes(mux)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -52,8 +54,8 @@ func main() {
 
 	fController.RegisterRoutes(mux, authController.Middleware)
 
-	log.Println("Server starting on port 8080...")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		log.Fatal(err)
+	logger.Info("server starting", "address", ":8080")
+	if err := http.ListenAndServe(":8080", logging.AccessLog(logger, mux)); err != nil {
+		logger.Error("server stopped", "error", err)
 	}
 }

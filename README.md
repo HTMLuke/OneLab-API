@@ -129,6 +129,10 @@ ONELAB_PAPERLESS_BASE_URL=http://paperless.local/
 ONELAB_PAPERLESS_TOKEN=your-paperless-api-token
 ```
 
+### Container logging
+
+The application writes structured JSON logs to stdout so Docker and other container runtimes can collect them. Set `ONELAB_LOG_LEVEL` to `debug`, `info` (default), `warn`, or `error` to control verbosity. The logger never writes application log files inside the container.
+
 See [.env.example](.env.example) for the full reference file.
 
 ---
