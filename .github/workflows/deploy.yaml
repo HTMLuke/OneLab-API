@@ -15,15 +15,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Stop old dev container
+      - name: Create dev config
+        env:
+          APP_CONFIG: ${{ secrets.DEV_APP_CONFIG }}
         run: |
-          docker stop onelab-api-dev || true
-          docker rm onelab-api-dev || true
+          test -n "$APP_CONFIG"
+          printf '%s' "$APP_CONFIG" > config/config.json
+          chmod 600 config/config.json
 
-      - name: Build dev image
-        run: docker build -t onelab-api:dev .
-
-      - name: Start dev container
+      - name: Deploy dev with Docker
         env:
           SECRET_NC_USER: ${{ secrets.DEV_NEXTCLOUD_USER }}
           SECRET_NC_PASS: ${{ secrets.DEV_NEXTCLOUD_PASSWORD }}
@@ -34,6 +34,9 @@ jobs:
           SECRET_CLIENT_ID: ${{ secrets.DEV_AUTH_CLIENT_ID }}
           SECRET_CLIENT_SECRET: ${{ secrets.DEV_AUTH_CLIENT_SECRET }}
         run: |
+          docker stop onelab-api-dev || true
+          docker rm onelab-api-dev || true
+          docker build -t onelab-api:dev .
           docker run -d \
             --name onelab-api-dev \
             --restart always \
@@ -53,6 +56,11 @@ jobs:
             -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
             onelab-api:dev
+
+      - name: Remove dev config
+        if: always()
+        run: |
+          rm -f config/config.json
 
       - name: Cleanup
         run: docker image prune -f
@@ -79,15 +87,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Stop old prod container
+      - name: Create prod config
+        env:
+          APP_CONFIG: ${{ secrets.PROD_APP_CONFIG }}
         run: |
-          docker stop onelab-api-prod || true
-          docker rm onelab-api-prod || true
+          test -n "$APP_CONFIG"
+          printf '%s' "$APP_CONFIG" > config/config.json
+          chmod 600 config/config.json
 
-      - name: Build prod image
-        run: docker build -t onelab-api:prod .
-
-      - name: Start prod container
+      - name: Deploy prod with Docker
         env:
           SECRET_NC_USER: ${{ secrets.PROD_NEXTCLOUD_USER }}
           SECRET_NC_PASS: ${{ secrets.PROD_NEXTCLOUD_PASSWORD }}
@@ -98,6 +106,9 @@ jobs:
           SECRET_CLIENT_ID: ${{ secrets.PROD_AUTH_CLIENT_ID }}
           SECRET_CLIENT_SECRET: ${{ secrets.PROD_AUTH_CLIENT_SECRET }}
         run: |
+          docker stop onelab-api-prod || true
+          docker rm onelab-api-prod || true
+          docker build -t onelab-api:prod .
           docker run -d \
             --name onelab-api-prod \
             --restart always \
@@ -117,6 +128,11 @@ jobs:
             -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
             onelab-api:prod
+
+      - name: Remove prod config
+        if: always()
+        run: |
+          rm -f config/config.json
 
       - name: Cleanup
         run: docker image prune -f
