@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -35,10 +36,11 @@ type AppConfig struct {
 }
 
 type configService struct {
-	cfg *AppConfig
+	cfg    *AppConfig
+	logger *slog.Logger
 }
 
-func NewConfigService() (ConfigService, error) {
+func NewConfigService(logger *slog.Logger) (ConfigService, error) {
 	cfg := &AppConfig{
 		AuthExpiry:  6 * time.Hour,
 		Services:    map[string]ServiceConfig{},
@@ -57,10 +59,17 @@ func NewConfigService() (ConfigService, error) {
 			if fileCfg.Integrations.Auth != nil {
 				cfg.EnabledAuth = fileCfg.Integrations.Auth
 			}
+			if logger != nil {
+				logger.Info("configuration loaded", "path", "config/config.json")
+			}
+		} else if logger != nil {
+			logger.Warn("configuration file is invalid; using defaults and environment", "path", "config/config.json", "error", err)
 		}
+	} else if logger != nil {
+		logger.Debug("configuration file not found; using defaults and environment", "path", "config/config.json")
 	}
 
-	return &configService{cfg: cfg}, nil
+	return &configService{cfg: cfg, logger: logger}, nil
 }
 
 func (s *configService) GetAuthExpiry() time.Duration { return s.cfg.AuthExpiry }

@@ -3,21 +3,25 @@ package shellService
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // DockerCmdService executes commands inside Docker containers via the Docker CLI.
-type DockerCmdService struct{}
+type DockerCmdService struct {
+	logger *slog.Logger
+}
 
 func init() {
-	RegisterService("dockerCmd", func() (ShellService, error) {
-		return NewDockerCmdService(), nil
+	RegisterService("dockerCmd", func(logger *slog.Logger) (ShellService, error) {
+		return NewDockerCmdService(logger), nil
 	})
 }
 
-func NewDockerCmdService() *DockerCmdService {
-	return &DockerCmdService{}
+func NewDockerCmdService(logger *slog.Logger) *DockerCmdService {
+	return &DockerCmdService{logger: logger}
 }
 
 // Execute runs a command inside the given container.
@@ -36,6 +40,10 @@ func (s *DockerCmdService) ExecuteWithArgs(ctx context.Context, containerID stri
 	if command == "" {
 		return "", fmt.Errorf("command is required")
 	}
+	started := time.Now()
+	if s.logger != nil {
+		s.logger.Debug("docker command started", "container", containerID, "argument_count", len(args))
+	}
 
 	dockerArgs := []string{"exec", "-i", containerID}
 	if len(args) > 0 {
@@ -50,11 +58,17 @@ func (s *DockerCmdService) ExecuteWithArgs(ctx context.Context, containerID stri
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("docker command failed", "container", containerID, "argument_count", len(args), "duration_ms", time.Since(started).Seconds()*1000)
+		}
 		if len(output) > 0 {
 			return string(output), fmt.Errorf("docker command failed: %w: %s", err, strings.TrimSpace(string(output)))
 		}
 		return "", fmt.Errorf("docker command failed: %w", err)
 	}
 
+	if s.logger != nil {
+		s.logger.Debug("docker command completed", "container", containerID, "argument_count", len(args), "duration_ms", time.Since(started).Seconds()*1000)
+	}
 	return strings.TrimSpace(string(output)), nil
 }

@@ -1,13 +1,14 @@
 package auth
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/HTMLuke/OneLab-API/secretProvider"
 )
 
 // AuthBuilder constructs one auth integration from the configured auth expiry and shared secret
-type AuthBuilder func(expiry time.Duration, secrets secretProvider.SecretService) (AuthService, error)
+type AuthBuilder func(expiry time.Duration, secrets secretProvider.SecretService, logger *slog.Logger) (AuthService, error)
 
 // builders holds every known auth integration keyed by name
 // each service file adds itself here from its own init()

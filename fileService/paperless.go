@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -27,6 +28,7 @@ type PaperlessService struct {
 	apiLookupUrl  string
 	token         string
 	dockerService shellService.ShellService
+	logger        *slog.Logger
 }
 
 type PaperlessFileMetadata struct {
@@ -71,12 +73,12 @@ type PaperlessSearchResponse struct {
 }
 
 func init() {
-	RegisterIntegration("paperless", func(baseURL string, s secretProvider.SecretService) (IntegrationService, error) {
-		return NewPaperlessService(baseURL, s)
+	RegisterIntegration("paperless", func(baseURL string, s secretProvider.SecretService, logger *slog.Logger) (IntegrationService, error) {
+		return NewPaperlessService(baseURL, s, logger)
 	})
 }
 
-func NewPaperlessService(baseURL string, secretService secretProvider.SecretService) (*PaperlessService, error) {
+func NewPaperlessService(baseURL string, secretService secretProvider.SecretService, logger *slog.Logger) (*PaperlessService, error) {
 	token, err := secretService.GetSecret("ONELAB_PAPERLESS_TOKEN")
 	if err != nil {
 		return nil, err
@@ -94,7 +96,8 @@ func NewPaperlessService(baseURL string, secretService secretProvider.SecretServ
 		getUrl:        getUrl,
 		token:         token,
 		apiLookupUrl:  apiLookupUrl,
-		dockerService: shellService.NewDockerCmdService(),
+		dockerService: shellService.NewDockerCmdService(logger),
+		logger:        logger,
 	}, nil
 }
 
@@ -152,6 +155,7 @@ func (s *PaperlessService) resolveWebserverContainer(ctx context.Context) (strin
 }
 
 func (s *PaperlessService) ExportDocuments(ctx context.Context) (string, error) {
+	s.log(ctx, slog.LevelDebug, "paperless export started")
 	containerName, err := s.resolveWebserverContainer(ctx)
 	if err != nil {
 		return "", err
@@ -171,6 +175,7 @@ func (s *PaperlessService) ExportDocuments(ctx context.Context) (string, error) 
 		}
 		return "", fmt.Errorf("paperless export failed in container %s: %w", containerName, err)
 	}
+	s.log(ctx, slog.LevelInfo, "paperless export completed")
 	return output, nil
 }
 
@@ -207,6 +212,7 @@ func findLatestZipInDockerExport(output string) (string, error) {
 }
 
 func (s *PaperlessService) Backup(ctx context.Context) (string, error) {
+	s.log(ctx, slog.LevelDebug, "paperless backup started")
 	containerName, err := s.resolveWebserverContainer(ctx)
 	if err != nil {
 		return "", err
@@ -257,10 +263,12 @@ func (s *PaperlessService) Backup(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("docker cp failed: %w", cpErr)
 	}
 
+	s.log(ctx, slog.LevelInfo, "paperless backup completed")
 	return localBackupPath, nil
 }
 
 func (s *PaperlessService) AddFile(ctx context.Context, file []byte, filename string) error {
+	s.log(ctx, slog.LevelDebug, "paperless upload started", "bytes", len(file))
 	// Initialize buffer and multipart writer
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -306,13 +314,16 @@ func (s *PaperlessService) AddFile(ctx context.Context, file []byte, filename st
 
 	// 6. Validate the response
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.log(ctx, slog.LevelWarn, "paperless upload failed", "status", resp.StatusCode)
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("paperless upload failed: status %d, response: %s", resp.StatusCode, string(bodyBytes))
 	}
 
+	s.log(ctx, slog.LevelInfo, "paperless upload completed", "status", resp.StatusCode)
 	return nil
 }
 func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, error) {
+	s.log(ctx, slog.LevelDebug, "paperless download started")
 	// Build the download URL: .../api/documents/{id}/download/
 	downloadPath, err := url.JoinPath(s.apiLookupUrl, fileID, "download/")
 	if err != nil {
@@ -338,6 +349,7 @@ func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, 
 
 	// Handle non-success HTTP statuses
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.log(ctx, slog.LevelWarn, "paperless download failed", "status", resp.StatusCode)
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("paperless download failed: status %d, response: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -348,9 +360,11 @@ func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, 
 		return nil, fmt.Errorf("failed to read paperless file content: %v", err)
 	}
 
+	s.log(ctx, slog.LevelInfo, "paperless download completed", "bytes", len(fileData), "status", resp.StatusCode)
 	return fileData, nil
 }
 func (s *PaperlessService) LookupFile(ctx context.Context, filename string) (any, error) {
+	s.log(ctx, slog.LevelDebug, "paperless lookup started")
 	req, err := http.NewRequestWithContext(ctx, "GET", s.apiLookupUrl, nil)
 	if err != nil {
 		return nil, err
@@ -385,9 +399,11 @@ func (s *PaperlessService) LookupFile(ctx context.Context, filename string) (any
 			PageCount:        entry.PageCount,
 		})
 	}
+	s.log(ctx, slog.LevelInfo, "paperless lookup completed", "result_count", len(results), "status", resp.StatusCode)
 	return results, nil
 }
 func (s *PaperlessService) CheckStatus(ctx context.Context) error {
+	s.log(ctx, slog.LevelDebug, "paperless health check started")
 	req, err := http.NewRequestWithContext(ctx, "GET", s.checkURL, nil)
 	if err != nil {
 		return err
@@ -401,8 +417,16 @@ func (s *PaperlessService) CheckStatus(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		s.log(ctx, slog.LevelWarn, "paperless health check failed", "status", resp.StatusCode)
 		return fmt.Errorf("paperless authentication failed with status: %d", resp.StatusCode)
 	}
 
+	s.log(ctx, slog.LevelDebug, "paperless health check completed", "status", resp.StatusCode)
 	return nil
+}
+
+func (s *PaperlessService) log(ctx context.Context, level slog.Level, message string, args ...any) {
+	if s.logger != nil {
+		s.logger.Log(ctx, level, message, args...)
+	}
 }
