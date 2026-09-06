@@ -100,6 +100,9 @@ Example service entries in [config/config.json](config/config.json):
 The `dockerCmd` entry is intentionally local-only. It does not call an HTTP API and does not need a remote base URL.
 
 The example config in [config/example-config.json](config/example-config.json) shows the same structure with disabled defaults.
+The `pgp` integration is internal and has no HTTP routes. It is configured only
+through `ONELAB_PGP_PUBLIC_KEY`; the example config keeps it disabled until
+that environment value contains a real ASCII-armored public key.
 
 ---
 
@@ -127,6 +130,9 @@ ONELAB_NEXTCLOUD_PASSWORD=your-nextcloud-password
 # Paperless-ngx
 ONELAB_PAPERLESS_BASE_URL=http://paperless.local/
 ONELAB_PAPERLESS_TOKEN=your-paperless-api-token
+
+# OpenPGP public key (ASCII-armored)
+ONELAB_PGP_PUBLIC_KEY="-----BEGIN PGP PUBLIC KEY BLOCK----- ..."
 ```
 
 ### Container logging
@@ -174,6 +180,13 @@ The file service integrations are registered in [fileService/registry.go](fileSe
 - supports file lookup and transfer-style workflows for the Paperless service
 - requires `ONELAB_PAPERLESS_TOKEN`
 - optional base URL via `ONELAB_PAPERLESS_BASE_URL`
+
+## OpenPGP encryption
+
+The `encryptionService` package loads an ASCII-armored public key from
+`ONELAB_PGP_PUBLIC_KEY`. It provides internal helpers for encrypting byte
+data, strings, JSON values, and file contents. It intentionally does not load
+private keys, decrypt messages, or expose signing functionality.
 
 ---
 
@@ -224,6 +237,23 @@ The file controller registers these routes through `authController.Middleware`:
 | --- | --- | --- |
 | `POST` | `/api/v1/files/transfer/` | transfer a file from one configured service to another |
 | `GET` | `/api/v1/files/lookup/` | search for a file in a configured source service |
+
+The transfer request accepts an optional `encryption` field. Set it to a
+registered encryption method such as `pgp` to encrypt the file before it is
+uploaded to the target service. Omitting the field transfers the original file
+unchanged.
+
+```json
+{
+  "source": "nextcloud",
+  "target": "paperless",
+  "filename": "report.pdf",
+  "encryption": "pgp"
+}
+```
+
+Encryption methods are selected through an internal interface, so additional
+methods can be registered without changing the transfer endpoint.
 
 Example token creation:
 
