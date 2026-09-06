@@ -16,12 +16,14 @@ import (
 type FileController struct {
 	// A map of available integration services (e.g., "nextcloud", "paperless")
 	integrations map[string]IntegrationService
+	encryption   func(method string, file []byte) ([]byte, error)
 	logger       *slog.Logger
 }
 
-func NewFileController(logger *slog.Logger) *FileController {
+func NewFileController(logger *slog.Logger, encryption func(method string, file []byte) ([]byte, error)) *FileController {
 	return &FileController{
 		integrations: make(map[string]IntegrationService),
+		encryption:   encryption,
 		logger:       logger,
 	}
 }
@@ -75,6 +77,15 @@ func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string,
 	}
 	return value, nil
 }
+
+func (c *FileController) GetOptionalValueFromBody(r *http.Request, key string) (string, error) {
+	value, err := c.GetValueFromBody(r, key)
+	if err != nil && strings.HasPrefix(err.Error(), fmt.Sprintf("key '%s' not found", key)) {
+		return "", nil
+	}
+	return value, err
+}
+
 func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	source, err := c.GetValueFromBody(r, "source")
@@ -93,6 +104,11 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, fmt.Sprintf("filename query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
+	encryption, err := c.GetOptionalValueFromBody(r, "encryption")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("encryption must be a string: %v", err), http.StatusBadRequest)
+		return
+	}
 
 	tvc, exists := c.integrations[target]
 	if !exists {
@@ -105,7 +121,7 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, fmt.Sprintf("Source software '%s' is not supported", source), http.StatusBadRequest)
 		return
 	}
-	err, statusCode := c.TransferHandler(svc, tvc, filename, r.Context())
+	err, statusCode := c.TransferHandler(svc, tvc, filename, encryption, r.Context())
 	if err != nil {
 		c.log(r.Context(), slog.LevelWarn, "file transfer failed", "source", source, "target", target, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		http.Error(w, fmt.Sprintf("Error transferring file: %v", err), statusCode)
@@ -116,7 +132,7 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 }
-func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename string, ctx context.Context) (error, int) {
+func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename, encryption string, ctx context.Context) (error, int) {
 	var fileID string
 	foundFiles, err, statusCode := c.LookupHandler(svc, filename, ctx) // Reuse the lookup handler to validate the file exists before transfer
 	if err != nil {
@@ -149,6 +165,15 @@ func (c *FileController) TransferHandler(svc IntegrationService, tvc Integration
 	file, err := svc.GetFile(ctx, fileID)
 	if err != nil {
 		return fmt.Errorf("error retrieving file content: %v", err), http.StatusInternalServerError
+	}
+	if encryption != "" {
+		if c.encryption == nil {
+			return fmt.Errorf("encryption provider is not configured"), http.StatusNotImplemented
+		}
+		file, err = c.encryption(encryption, file)
+		if err != nil {
+			return fmt.Errorf("error encrypting file with %s: %v", encryption, err), http.StatusBadRequest
+		}
 	}
 
 	err = tvc.AddFile(ctx, file, filename)
