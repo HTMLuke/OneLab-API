@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/HTMLuke/OneLab-API/secretProvider"
@@ -17,18 +18,18 @@ type jwtService struct {
 	clients            map[string]jwtClient
 	expirationDuration time.Duration
 	jwtSecret          []byte
+	logger             *slog.Logger
 }
 
 type jwtClient struct {
 	clientSecret string
 }
 
-
 func init() {
 	RegisterAuth("jwt", NewJwtService)
 }
 
-func NewJwtService(duration time.Duration, secretService secretProvider.SecretService) (AuthService, error) {
+func NewJwtService(duration time.Duration, secretService secretProvider.SecretService, logger *slog.Logger) (AuthService, error) {
 	jwtSecret, err := secretService.GetSecret("ONELAB_JWT_SECRET")
 	if err != nil {
 		return nil, err
@@ -45,6 +46,7 @@ func NewJwtService(duration time.Duration, secretService secretProvider.SecretSe
 		clients:            map[string]jwtClient{clientID: {clientSecret: clientSecret}},
 		expirationDuration: duration,
 		jwtSecret:          []byte(jwtSecret),
+		logger:             logger,
 	}, nil
 
 }
@@ -53,10 +55,13 @@ func (s *jwtService) ValidateCredentials(clientID string, clientSecret string) b
 	return exists && c.clientSecret == clientSecret
 }
 
-func (s *jwtService) GenerateToken(clientID string) (string, int, error) {
-	_, exists := s.clients[clientID]
-	if !exists {
-		return "", 0, errors.New("unknown client")
+func (s *jwtService) GenerateToken(clientID, clientSecret string) (string, int, error) {
+	c, exists := s.clients[clientID]
+	if !exists || c.clientSecret != clientSecret {
+		if s.logger != nil {
+			s.logger.Debug("jwt credentials rejected")
+		}
+		return "", 0, errInvalidCredentials
 	}
 
 	now := time.Now()
@@ -74,6 +79,9 @@ func (s *jwtService) GenerateToken(clientID string) (string, int, error) {
 		return "", 0, err
 	}
 
+	if s.logger != nil {
+		s.logger.Debug("jwt token generated", "expires_in_seconds", int(s.expirationDuration.Seconds()))
+	}
 	return signedString, int(s.expirationDuration.Seconds()), nil
 }
 

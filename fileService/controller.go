@@ -6,18 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 type FileController struct {
 	// A map of available integration services (e.g., "nextcloud", "paperless")
 	integrations map[string]IntegrationService
+	logger       *slog.Logger
 }
 
-func NewFileController() *FileController {
+func NewFileController(logger *slog.Logger) *FileController {
 	return &FileController{
 		integrations: make(map[string]IntegrationService),
+		logger:       logger,
 	}
 }
 
@@ -71,6 +76,7 @@ func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string,
 	return value, nil
 }
 func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	source, err := c.GetValueFromBody(r, "source")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
@@ -101,9 +107,11 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 	}
 	err, statusCode := c.TransferHandler(svc, tvc, filename, r.Context())
 	if err != nil {
+		c.log(r.Context(), slog.LevelWarn, "file transfer failed", "source", source, "target", target, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		http.Error(w, fmt.Sprintf("Error transferring file: %v", err), statusCode)
 		return
 	} else {
+		c.log(r.Context(), slog.LevelInfo, "file transfer completed", "source", source, "target", target, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		w.WriteHeader(statusCode)
 		return
 	}
@@ -155,14 +163,17 @@ func (c *FileController) CheckIntegrationsStatus(ctx context.Context) map[string
 	statusMap := make(map[string]string)
 	for name, svc := range c.integrations {
 		if err := svc.CheckStatus(ctx); err != nil {
+			c.log(ctx, slog.LevelWarn, "integration health check failed", "integration", name)
 			statusMap[name] = fmt.Sprintf("DOWN (%v)", err.Error())
 		} else {
+			c.log(ctx, slog.LevelDebug, "integration health check passed", "integration", name)
 			statusMap[name] = "OK"
 		}
 	}
 	return statusMap
 }
 func (c *FileController) HTTPLookupHandler(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	source, err := c.GetValueFromQuery(r, "source")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
@@ -184,15 +195,18 @@ func (c *FileController) HTTPLookupHandler(w http.ResponseWriter, r *http.Reques
 
 	result, err, statusCode := c.LookupHandler(svc, filename, r.Context())
 	if err != nil {
+		c.log(r.Context(), slog.LevelWarn, "file lookup failed", "source", sourceSoft, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		http.Error(w, fmt.Sprintf("Error looking up file from %s: %v", sourceSoft, err), statusCode)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
+		c.log(r.Context(), slog.LevelError, "file lookup response encoding failed", "source", sourceSoft, "status", http.StatusInternalServerError)
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 		return
 	}
+	c.log(r.Context(), slog.LevelInfo, "file lookup completed", "source", sourceSoft, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 
 }
 func (c *FileController) LookupHandler(svc IntegrationService, filename string, ctx context.Context) (any, error, int) {
@@ -210,11 +224,54 @@ func (c *FileController) LookupHandler(svc IntegrationService, filename string, 
 		return nil, fmt.Errorf("lookup not supported for source"), http.StatusBadRequest
 	}
 }
+func (c *FileController) HandlePaperlessBackup(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	paperlessSvc, exists := c.integrations["paperless"]
+	if !exists {
+		http.Error(w, "paperless integration is not configured", http.StatusNotFound)
+		return
+	}
+
+	backupSvc, ok := paperlessSvc.(PaperlessBackupService)
+	if !ok {
+		http.Error(w, "paperless backup is not supported", http.StatusNotImplemented)
+		return
+	}
+
+	path, err := backupSvc.Backup(r.Context())
+	if err != nil {
+		c.log(r.Context(), slog.LevelError, "paperless backup failed", "duration_ms", time.Since(started).Seconds()*1000)
+		http.Error(w, fmt.Sprintf("failed to create paperless backup: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"status":   "ok",
+		"path":     path,
+		"filename": filepath.Base(path),
+	}); err != nil {
+		c.log(r.Context(), slog.LevelError, "paperless backup response encoding failed")
+		http.Error(w, fmt.Sprintf("failed to encode backup response: %v", err), http.StatusInternalServerError)
+		return
+	}
+	c.log(r.Context(), slog.LevelInfo, "paperless backup completed", "duration_ms", time.Since(started).Seconds()*1000)
+}
+
+func (c *FileController) log(ctx context.Context, level slog.Level, message string, args ...any) {
+	if c.logger != nil {
+		c.logger.Log(ctx, level, message, args...)
+	}
+}
+
 func (c *FileController) RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
 
 	transferHandler := http.HandlerFunc(c.HTTPTransferHandler)
 	lookupHandler := http.HandlerFunc(c.HTTPLookupHandler)
+	backupHandler := http.HandlerFunc(c.HandlePaperlessBackup)
 
 	mux.Handle("POST /api/v1/files/transfer/", authMiddleware(transferHandler))
 	mux.Handle("GET /api/v1/files/lookup/", authMiddleware(lookupHandler))
+	mux.Handle("GET /api/v1/paperless/backup", authMiddleware(backupHandler))
 }

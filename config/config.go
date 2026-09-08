@@ -2,7 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -34,10 +36,11 @@ type AppConfig struct {
 }
 
 type configService struct {
-	cfg *AppConfig
+	cfg    *AppConfig
+	logger *slog.Logger
 }
 
-func NewConfigService() (ConfigService, error) {
+func NewConfigService(logger *slog.Logger) (ConfigService, error) {
 	cfg := &AppConfig{
 		AuthExpiry:  6 * time.Hour,
 		Services:    map[string]ServiceConfig{},
@@ -56,10 +59,17 @@ func NewConfigService() (ConfigService, error) {
 			if fileCfg.Integrations.Auth != nil {
 				cfg.EnabledAuth = fileCfg.Integrations.Auth
 			}
+			if logger != nil {
+				logger.Info("configuration loaded", "path", "config/config.json")
+			}
+		} else if logger != nil {
+			logger.Warn("configuration file is invalid; using defaults and environment", "path", "config/config.json", "error", err)
 		}
+	} else if logger != nil {
+		logger.Debug("configuration file not found; using defaults and environment", "path", "config/config.json")
 	}
 
-	return &configService{cfg: cfg}, nil
+	return &configService{cfg: cfg, logger: logger}, nil
 }
 
 func (s *configService) GetAuthExpiry() time.Duration { return s.cfg.AuthExpiry }
@@ -68,9 +78,29 @@ func (s *configService) GetAuthExpiry() time.Duration { return s.cfg.AuthExpiry 
 // unknown names default to false
 func (s *configService) IsServiceEnabled(name string) bool { return s.cfg.Services[name].Enabled }
 
-// GetServiceURL returns the configured base URL for a service integration
+// GetServiceURL returns the configured base URL for a service integration.
+// If the config file omits a URL, we fall back to the matching env var.
 // unknown names default to ""
-func (s *configService) GetServiceURL(name string) string { return s.cfg.Services[name].URL }
+func (s *configService) GetServiceURL(name string) string {
+	if service, ok := s.cfg.Services[name]; ok && strings.TrimSpace(service.URL) != "" {
+		return service.URL
+	}
+
+	envName := strings.ToUpper(strings.NewReplacer("-", "_", " ", "_", ".", "_").Replace(name))
+	for _, key := range []string{
+		"ONELAB_" + envName + "_BASE_URL",
+		"ONELAB_" + envName + "_URL",
+	} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+
+	if service, ok := s.cfg.Services[name]; ok {
+		return service.URL
+	}
+	return ""
+}
 
 // IsAuthEnabled tracks whether an auth integration is enabled or disabled
 // unknown names default to false

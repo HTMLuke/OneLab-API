@@ -2,13 +2,15 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+	"os"
 
 	"github.com/HTMLuke/OneLab-API/auth"
 	"github.com/HTMLuke/OneLab-API/config"
 	"github.com/HTMLuke/OneLab-API/fileService"
+	"github.com/HTMLuke/OneLab-API/logging"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
+	"github.com/joho/godotenv"
 )
 
 type Response struct {
@@ -18,33 +20,27 @@ type Response struct {
 }
 
 func main() {
-	// Initialize Config Service
-	cfgService, err := config.NewConfigService()
-	if err != nil {
-		log.Printf("Warning: Failed to load config file (falling back to defaults & env): %v", err)
+	logger := logging.New()
+
+	if _, err := os.Stat(".env"); err == nil {
+		if err := godotenv.Load(".env"); err != nil {
+			logger.Warn("failed to load environment file", "error", err)
+		}
 	}
-	secretService := secretProvider.NewSecretService()
+
+	// Initialize Config Service
+	cfgService, err := config.NewConfigService(logger)
+	if err != nil {
+		logger.Warn("failed to load config file; using defaults and environment", "error", err)
+	}
+	secretService := secretProvider.NewSecretService(logger)
 	mux := http.NewServeMux()
 
 	// Build controllers and wire in every integration enabled in config
-	authController := auth.NewAuthController()
-	fController := fileService.NewFileController()
-	registerIntegrations(cfgService, secretService, fController, authController)
+	authController := auth.NewAuthController(logger)
+	fController := fileService.NewFileController(logger)
+	registerIntegrations(cfgService, secretService, fController, authController, logger)
 	authController.RegisterRoutes(mux)
-
-	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Check the status of all registered integrations
-		integrationStatuses := fController.CheckIntegrationsStatus(r.Context())
-
-		res := Response{
-			Message:      "OneAPI running!",
-			Status:       "OK",
-			Integrations: integrationStatuses,
-		}
-		json.NewEncoder(w).Encode(res)
-	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -58,8 +54,8 @@ func main() {
 
 	fController.RegisterRoutes(mux, authController.Middleware)
 
-	log.Println("Server starting on port 8080...")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		log.Fatal(err)
+	logger.Info("server starting", "address", ":8080")
+	if err := http.ListenAndServe(":8080", logging.AccessLog(logger, mux)); err != nil {
+		logger.Error("server stopped", "error", err)
 	}
 }
