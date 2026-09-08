@@ -1,5 +1,8 @@
 # OneLab-API
-## This project is currently in beta. Bugs are possible and logging is not that good.
+
+> [!WARNING]  
+> This project is currently in beta. Bugs are possible and logging is not final.
+
 OneLab-API is a small Go API gateway that brings self-hosted services behind a single authenticated HTTP interface. It currently supports:
 
 - auth integrations for token issuance and validation
