@@ -36,7 +36,7 @@ func (c *Controller) AddTarget(name string, target Target) {
 	c.targets[name] = target
 }
 
-// HandleBackup creates a backup and optionally encrypts and uploads it.
+// HandleBackup creates, optionally encrypts, and uploads a backup.
 func (c *Controller) HandleBackup(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	sourceName := r.URL.Query().Get("source")
@@ -51,13 +51,14 @@ func (c *Controller) HandleBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetName := r.URL.Query().Get("target")
-	var target Target
-	if targetName != "" {
-		target, ok = c.targets[targetName]
-		if !ok {
-			http.Error(w, fmt.Sprintf("target %q is not supported", targetName), http.StatusBadRequest)
-			return
-		}
+	if targetName == "" {
+		http.Error(w, "target query parameter is required", http.StatusBadRequest)
+		return
+	}
+	target, ok := c.targets[targetName]
+	if !ok {
+		http.Error(w, fmt.Sprintf("target %q is not supported", targetName), http.StatusBadRequest)
+		return
 	}
 
 	result, err := c.processor.Create(r.Context(), source, target, targetName, r.URL.Query().Get("encryption"))

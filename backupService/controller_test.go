@@ -39,3 +39,19 @@ func TestControllerHandlesBackupWithTargetAndEncryption(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", response.Code, response.Body.String())
 	}
 }
+
+func TestControllerRequiresSourceAndTarget(t *testing.T) {
+	controller := NewController(nil, nil)
+
+	for _, requestURL := range []string{
+		"/api/v1/backup?target=nextcloud",
+		"/api/v1/backup?source=paperless",
+	} {
+		request := httptest.NewRequest(http.MethodGet, requestURL, nil)
+		response := httptest.NewRecorder()
+		controller.HandleBackup(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400 for %s, got %d", requestURL, response.Code)
+		}
+	}
+}
