@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/HTMLuke/OneLab-API/auth"
+	backupservice "github.com/HTMLuke/OneLab-API/backupService"
 	"github.com/HTMLuke/OneLab-API/config"
 	encryptionservice "github.com/HTMLuke/OneLab-API/encryptionService"
 	"github.com/HTMLuke/OneLab-API/fileService"
@@ -12,7 +13,7 @@ import (
 
 // registerIntegrations wires every enabled integration into its controller
 // Integrations register themselves from their own files via their init()
-func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, ac *auth.AuthController, ec *encryptionservice.Controller, logger *slog.Logger) {
+func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, bc *backupservice.Controller, ac *auth.AuthController, ec *encryptionservice.Controller, logger *slog.Logger) {
 	for name, build := range fileService.Builders() {
 		if !cfg.IsServiceEnabled(name) {
 			continue
@@ -23,6 +24,12 @@ func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretServi
 			continue
 		}
 		fc.AddIntegration(name, svc)
+		if target, ok := svc.(backupservice.Target); ok {
+			bc.AddTarget(name, target)
+		}
+		if name == "paperless" {
+			bc.AddSource(name, backupservice.NewPaperlessService(logger))
+		}
 		logger.Info("service integration enabled", "integration", name)
 	}
 

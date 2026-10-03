@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/HTMLuke/OneLab-API/auth"
+	backupservice "github.com/HTMLuke/OneLab-API/backupService"
 	"github.com/HTMLuke/OneLab-API/config"
 	encryptionservice "github.com/HTMLuke/OneLab-API/encryptionService"
 	"github.com/HTMLuke/OneLab-API/fileService"
@@ -41,7 +42,8 @@ func main() {
 	authController := auth.NewAuthController(logger)
 	eController := encryptionservice.NewController()
 	fController := fileService.NewFileController(logger, eController.Encrypt)
-	registerIntegrations(cfgService, secretService, fController, authController, eController, logger)
+	bController := backupservice.NewController(logger, eController.Encrypt)
+	registerIntegrations(cfgService, secretService, fController, bController, authController, eController, logger)
 	authController.RegisterRoutes(mux)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +57,7 @@ func main() {
 	})
 
 	fController.RegisterRoutes(mux, authController.Middleware)
+	bController.RegisterRoutes(mux, authController.Middleware)
 
 	logger.Info("server starting", "address", ":8080")
 	if err := http.ListenAndServe(":8080", logging.AccessLog(logger, mux)); err != nil {

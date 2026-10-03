@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -264,41 +263,6 @@ func (c *FileController) LookupHandler(svc IntegrationService, filename string, 
 		return nil, fmt.Errorf("lookup not supported for source"), http.StatusBadRequest
 	}
 }
-func (c *FileController) HandlePaperlessBackup(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	paperlessSvc, exists := c.integrations["paperless"]
-	if !exists {
-		http.Error(w, "paperless integration is not configured", http.StatusNotFound)
-		return
-	}
-
-	backupSvc, ok := paperlessSvc.(PaperlessBackupService)
-	if !ok {
-		http.Error(w, "paperless backup is not supported", http.StatusNotImplemented)
-		return
-	}
-
-	path, err := backupSvc.Backup(r.Context())
-	if err != nil {
-		c.log(r.Context(), slog.LevelError, "paperless backup failed", "duration_ms", time.Since(started).Seconds()*1000)
-		http.Error(w, fmt.Sprintf("failed to create paperless backup: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]any{
-		"status":   "ok",
-		"path":     path,
-		"filename": filepath.Base(path),
-	}); err != nil {
-		c.log(r.Context(), slog.LevelError, "paperless backup response encoding failed")
-		http.Error(w, fmt.Sprintf("failed to encode backup response: %v", err), http.StatusInternalServerError)
-		return
-	}
-	c.log(r.Context(), slog.LevelInfo, "paperless backup completed", "duration_ms", time.Since(started).Seconds()*1000)
-}
-
 func (c *FileController) log(ctx context.Context, level slog.Level, message string, args ...any) {
 	if c.logger != nil {
 		c.logger.Log(ctx, level, message, args...)
@@ -309,9 +273,7 @@ func (c *FileController) RegisterRoutes(mux *http.ServeMux, authMiddleware func(
 
 	transferHandler := http.HandlerFunc(c.HTTPTransferHandler)
 	lookupHandler := http.HandlerFunc(c.HTTPLookupHandler)
-	backupHandler := http.HandlerFunc(c.HandlePaperlessBackup)
 
 	mux.Handle("POST /api/v1/files/transfer/", authMiddleware(transferHandler))
 	mux.Handle("GET /api/v1/files/lookup/", authMiddleware(lookupHandler))
-	mux.Handle("GET /api/v1/paperless/backup", authMiddleware(backupHandler))
 }
