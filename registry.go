@@ -5,13 +5,14 @@ import (
 
 	"github.com/HTMLuke/OneLab-API/auth"
 	"github.com/HTMLuke/OneLab-API/config"
+	encryptionservice "github.com/HTMLuke/OneLab-API/encryptionService"
 	"github.com/HTMLuke/OneLab-API/fileService"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
 )
 
 // registerIntegrations wires every enabled integration into its controller
 // Integrations register themselves from their own files via their init()
-func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, ac *auth.AuthController, logger *slog.Logger) {
+func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, ac *auth.AuthController, ec *encryptionservice.Controller, logger *slog.Logger) {
 	for name, build := range fileService.Builders() {
 		if !cfg.IsServiceEnabled(name) {
 			continue
@@ -36,5 +37,18 @@ func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretServi
 		}
 		ac.AddIntegration(name, svc)
 		logger.Info("auth integration enabled", "integration", name)
+	}
+
+	for name, build := range encryptionservice.Builders() {
+		if !cfg.IsServiceEnabled(name) {
+			continue
+		}
+		svc, err := build(s, logger)
+		if err != nil {
+			logger.Warn("encryption integration failed to initialize", "integration", name, "error", err)
+			continue
+		}
+		ec.AddIntegration(name, svc)
+		logger.Info("encryption integration enabled", "integration", name)
 	}
 }

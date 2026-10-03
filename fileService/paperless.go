@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -60,6 +61,7 @@ type PaperlessFileResponse struct {
 	ID               int    `json:"id"`
 	Title            string `json:"title"`
 	OriginalFileName string `json:"original_file_name"`
+	MimeType         string `json:"mime_type"`
 	Created          string `json:"created"`
 	PageCount        int    `json:"page_count"`
 }
@@ -323,16 +325,21 @@ func (s *PaperlessService) AddFile(ctx context.Context, file []byte, filename st
 	return nil
 }
 func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, error) {
+	fileData, _, err := s.GetFileWithName(ctx, fileID)
+	return fileData, err
+}
+
+func (s *PaperlessService) GetFileWithName(ctx context.Context, fileID string) ([]byte, string, error) {
 	s.log(ctx, slog.LevelDebug, "paperless download started")
 	// Build the download URL: .../api/documents/{id}/download/
 	downloadPath, err := url.JoinPath(s.apiLookupUrl, fileID, "download/")
 	if err != nil {
-		return nil, fmt.Errorf("failed to build download URL: %v", err)
+		return nil, "", fmt.Errorf("failed to build download URL: %v", err)
 	}
 	//create request with context
 	req, err := http.NewRequestWithContext(ctx, "GET", downloadPath, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Set required headers
@@ -343,7 +350,7 @@ func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, 
 	//  Send the request
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send download request to paperless: %v", err)
+		return nil, "", fmt.Errorf("failed to send download request to paperless: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -351,17 +358,37 @@ func (s *PaperlessService) GetFile(ctx context.Context, fileID string) ([]byte, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		s.log(ctx, slog.LevelWarn, "paperless download failed", "status", resp.StatusCode)
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("paperless download failed: status %d, response: %s", resp.StatusCode, string(bodyBytes))
+		return nil, "", fmt.Errorf("paperless download failed: status %d, response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	filename, err := filenameFromContentDisposition(resp.Header.Get("Content-Disposition"))
+	if err != nil {
+		return nil, "", err
 	}
 
 	// Read the raw file binary data into a byte slice
 	fileData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read paperless file content: %v", err)
+		return nil, "", fmt.Errorf("failed to read paperless file content: %v", err)
 	}
 
 	s.log(ctx, slog.LevelInfo, "paperless download completed", "bytes", len(fileData), "status", resp.StatusCode)
-	return fileData, nil
+	return fileData, filename, nil
+}
+
+func filenameFromContentDisposition(value string) (string, error) {
+	if value == "" {
+		return "", fmt.Errorf("paperless download response does not contain a Content-Disposition header")
+	}
+	_, params, err := mime.ParseMediaType(value)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse paperless Content-Disposition header: %w", err)
+	}
+	filename, ok := params["filename"]
+	if !ok || filename == "" {
+		return "", fmt.Errorf("paperless Content-Disposition header does not contain a filename")
+	}
+	return filename, nil
 }
 func (s *PaperlessService) LookupFile(ctx context.Context, filename string) (any, error) {
 	s.log(ctx, slog.LevelDebug, "paperless lookup started")
@@ -395,6 +422,7 @@ func (s *PaperlessService) LookupFile(ctx context.Context, filename string) (any
 			ID:               entry.ID,
 			Title:            entry.Title,
 			OriginalFileName: entry.OriginalFileName,
+			MimeType:         entry.MimeType,
 			Created:          entry.Created,
 			PageCount:        entry.PageCount,
 		})
