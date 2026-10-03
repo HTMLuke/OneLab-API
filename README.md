@@ -237,6 +237,7 @@ The file controller registers these routes through `authController.Middleware`:
 | --- | --- | --- |
 | `POST` | `/api/v1/files/transfer/` | transfer a file from one configured service to another |
 | `GET` | `/api/v1/files/lookup/` | search for a file in a configured source service |
+| `GET` | `/api/v1/backup` | create a backup from a configured source |
 
 The transfer request accepts an optional `encryption` field. Set it to a
 registered encryption method such as `pgp` to encrypt the file before it is
@@ -260,6 +261,21 @@ the field transfers the original file unchanged.
 
 Encryption methods are selected through an internal interface, so additional
 methods can be registered without changing the transfer endpoint.
+
+The general backup endpoint requires `source` and `target` query parameters.
+The `encryption` parameter is optional:
+
+```text
+GET /api/v1/backup?source=paperless&target=nextcloud&encryption=pgp
+```
+
+The backup is created by the selected backup source, optionally encrypted with
+the configured public key, and uploaded to the selected file integration
+through the `IntegrationService` interface. The original filename of the
+generated backup is used, with `.pgp` appended when encryption is enabled. The
+local backup file is deleted after the upload succeeds. The temporary ZIP inside
+the Paperless container is deleted after it has been copied to the local backup
+directory.
 
 Example token creation:
 
