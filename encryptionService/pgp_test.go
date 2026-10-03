@@ -3,6 +3,7 @@ package encryptionservice
 import (
 	"bytes"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/HTMLuke/OneLab-API/secretProvider"
@@ -87,5 +88,39 @@ func TestPGPServiceEncryptValuesAndFile(t *testing.T) {
 
 	if _, err := service.EncryptFile([]byte("file contents")); err != nil {
 		t.Fatalf("encrypt file: %v", err)
+	}
+}
+
+func TestPGPServicePreservesBinaryFileBytes(t *testing.T) {
+	entity, err := openpgp.NewEntity("test", "", "test@example.com", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	service, err := NewPGPService(testSecrets{value: armoredKey(t, entity, false)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	original := append([]byte("%PDF-1.7\n"), []byte{0x00, 0x01, 0x80, 0xff, 0x0a}...)
+	encrypted, err := service.EncryptFile(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded, err := armor.Decode(bytes.NewReader(encrypted))
+	if err != nil {
+		t.Fatalf("decode armored message: %v", err)
+	}
+	message, err := openpgp.ReadMessage(decoded.Body, openpgp.EntityList{entity}, nil, nil)
+	if err != nil {
+		t.Fatalf("read encrypted message: %v", err)
+	}
+	decrypted, err := io.ReadAll(message.UnverifiedBody)
+	if err != nil {
+		t.Fatalf("read decrypted bytes: %v", err)
+	}
+	if !bytes.Equal(decrypted, original) {
+		t.Fatalf("decrypted file bytes differ from original: got %x, want %x", decrypted, original)
 	}
 }

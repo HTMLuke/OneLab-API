@@ -240,8 +240,14 @@ The file controller registers these routes through `authController.Middleware`:
 
 The transfer request accepts an optional `encryption` field. Set it to a
 registered encryption method such as `pgp` to encrypt the file before it is
-uploaded to the target service. Omitting the field transfers the original file
-unchanged.
+uploaded to the target service. When transferring from Paperless, the
+destination filename is read from the download response's
+`Content-Disposition` header. The RFC 5987 `filename*` parameter is preferred
+over `filename` and is URL-decoded. This preserves the original filename of the
+PDF as it was uploaded to Paperless, rather than using the Paperless document
+title. The download fails if Paperless does not provide a filename in that
+header. Encrypted transfers append `.pgp` to the resulting filename. Omitting
+the field transfers the original file unchanged.
 
 ```json
 {

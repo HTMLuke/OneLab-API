@@ -66,7 +66,8 @@ func (s *PGPService) Encrypt(plaintext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create armored message: %w", err)
 	}
-	ciphertext, err := openpgp.Encrypt(armored, s.keyring, nil, nil, nil)
+	// Mark file transfers as binary to preserve their exact contents.
+	ciphertext, err := openpgp.Encrypt(armored, s.keyring, nil, &openpgp.FileHints{IsBinary: true}, nil)
 	if err != nil {
 		_ = armored.Close()
 		return nil, fmt.Errorf("encrypt message: %w", err)

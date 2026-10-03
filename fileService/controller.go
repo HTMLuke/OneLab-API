@@ -134,6 +134,7 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 }
 func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename, encryption string, ctx context.Context) (error, int) {
 	var fileID string
+	destinationFilename := filename
 	foundFiles, err, statusCode := c.LookupHandler(svc, filename, ctx) // Reuse the lookup handler to validate the file exists before transfer
 	if err != nil {
 		return err, statusCode
@@ -158,11 +159,23 @@ func (c *FileController) TransferHandler(svc IntegrationService, tvc Integration
 			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
 		}
 		fileID = fmt.Sprintf("%d", files[0].ID)
+		if files[0].OriginalFileName != "" {
+			destinationFilename = files[0].OriginalFileName
+		}
 	default:
 		return fmt.Errorf("unsupported response type from source lookup"), http.StatusInternalServerError
 	}
 
-	file, err := svc.GetFile(ctx, fileID)
+	var file []byte
+	var downloadFilename string
+	if namedGetter, ok := svc.(NamedFileGetter); ok {
+		file, downloadFilename, err = namedGetter.GetFileWithName(ctx, fileID)
+		if err == nil {
+			destinationFilename = downloadFilename
+		}
+	} else {
+		file, err = svc.GetFile(ctx, fileID)
+	}
 	if err != nil {
 		return fmt.Errorf("error retrieving file content: %v", err), http.StatusInternalServerError
 	}
@@ -174,9 +187,11 @@ func (c *FileController) TransferHandler(svc IntegrationService, tvc Integration
 		if err != nil {
 			return fmt.Errorf("error encrypting file with %s: %v", encryption, err), http.StatusBadRequest
 		}
+		// add right extension to filename if encrypted
+		destinationFilename += ".pgp"
 	}
 
-	err = tvc.AddFile(ctx, file, filename)
+	err = tvc.AddFile(ctx, file, destinationFilename)
 	if err != nil {
 		return fmt.Errorf("error adding file to target: %v", err), http.StatusInternalServerError
 	}
