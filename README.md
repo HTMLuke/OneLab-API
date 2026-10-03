@@ -24,12 +24,15 @@ The project is designed to run as a single lightweight service and can be deploy
 ## Project layout
 
 - [main.go](main.go) — app startup and HTTP routing
-- [registry.go](registry.go) — integration wiring for file and auth services
+- [registry.go](registry.go) — integration wiring for auth, file, backup, and encryption services
 - [auth/](auth) — auth integrations and validation logic
-- [fileService/](fileService) — Nextcloud and Paperless integrations
+- [fileService/](fileService) — Nextcloud and Paperless file integrations and transfers
+- [backupService/](backupService) — backup orchestration, backup endpoints, Paperless exports, and target uploads
+- [encryptionService/](encryptionService) — backup encryption integrations, including PGP
 - [shellService/](shellService) — shell execution service implementations
 - [config/](config) — configuration loading and defaults
 - [secretProvider/](secretProvider) — environment-based secret access
+- [logging/](logging) — application logging setup
 - [Dockerfile](Dockerfile) — production container image
 - [docker-compose.yml](docker-compose.yml) — local compose run configuration
 - [.github/workflows/deploy.yaml](.github/workflows/deploy.yaml) — self-hosted deployment workflow
