@@ -1,7 +1,9 @@
 package shellService
 
+import "log/slog"
+
 // ServiceBuilder builds a shell service implementation.
-type ServiceBuilder func() (ShellService, error)
+type ServiceBuilder func(logger *slog.Logger) (ShellService, error)
 
 // builders holds every known shell service keyed by name.
 var builders = map[string]ServiceBuilder{}

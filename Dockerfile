@@ -8,8 +8,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /onelab-api .
 FROM alpine:latest
 RUN apk add --no-cache ca-certificates docker-cli \
 	&& update-ca-certificates
-WORKDIR /
+WORKDIR /app
 COPY --from=builder /onelab-api /onelab-api
-COPY config/config.json /config/config.json
+COPY --from=builder /app/config ./config
 EXPOSE 8080
 CMD ["/onelab-api"]

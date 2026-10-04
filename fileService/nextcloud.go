@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +21,7 @@ type NextcloudService struct {
 	apiGetUrl    string
 	username     string
 	password     string
+	logger       *slog.Logger
 }
 
 type NextcloudFileMetadata struct {
@@ -68,12 +70,12 @@ type NextcloudSearchResponse struct {
 }
 
 func init() {
-	RegisterIntegration("nextcloud", func(baseURL string, s secretProvider.SecretService) (IntegrationService, error) {
-		return NewNextcloudService(baseURL, s)
+	RegisterIntegration("nextcloud", func(baseURL string, s secretProvider.SecretService, logger *slog.Logger) (IntegrationService, error) {
+		return NewNextcloudService(baseURL, s, logger)
 	})
 }
 
-func NewNextcloudService(baseURL string, secretService secretProvider.SecretService) (*NextcloudService, error) {
+func NewNextcloudService(baseURL string, secretService secretProvider.SecretService, logger *slog.Logger) (*NextcloudService, error) {
 	username, err := secretService.GetSecret("ONELAB_NEXTCLOUD_USER")
 	if err != nil {
 		return nil, err
@@ -94,10 +96,12 @@ func NewNextcloudService(baseURL string, secretService secretProvider.SecretServ
 		apiGetUrl:    apiGet,
 		username:     username,
 		password:     password,
+		logger:       logger,
 	}, nil
 }
 
 func (s *NextcloudService) AddFile(ctx context.Context, file []byte, filename string) error {
+	s.log(ctx, slog.LevelDebug, "nextcloud upload started", "bytes", len(file))
 	// Build the full WebDAV destination URL: .../remote.php/dav/files/USERNAME/filename
 	cleanFilename, err := url.PathUnescape(filename)
 	if err != nil {
@@ -136,13 +140,16 @@ func (s *NextcloudService) AddFile(ctx context.Context, file []byte, filename st
 	// Handle Nextcloud/WebDAV responses
 	// WebDAV usually returns 201 (Created) for new files or 204 (No Content) if overwriting
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.log(ctx, slog.LevelWarn, "nextcloud upload failed", "status", resp.StatusCode)
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upload failed: received status code %d, response: %s", resp.StatusCode, string(bodyBytes))
 	}
 
+	s.log(ctx, slog.LevelInfo, "nextcloud upload completed", "status", resp.StatusCode)
 	return nil
 }
 func (s *NextcloudService) GetFile(ctx context.Context, filePath string) ([]byte, error) {
+	s.log(ctx, slog.LevelDebug, "nextcloud download started")
 	// Build url to: .../remote.php/dav/files/USERNAME/?X-File-Id=12345
 	userURL, err := url.JoinPath(s.apiGetUrl, s.username)
 	fullURL, err := url.JoinPath(userURL, filePath)
@@ -176,6 +183,7 @@ func (s *NextcloudService) GetFile(ctx context.Context, filePath string) ([]byte
 
 	// error handling for non-success status codes
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.log(ctx, slog.LevelWarn, "nextcloud download failed", "status", resp.StatusCode)
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("request failed: received status code %d, response: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -187,9 +195,11 @@ func (s *NextcloudService) GetFile(ctx context.Context, filePath string) ([]byte
 	}
 
 	// return file content as bytes (or you could return an io.Reader or any other format depending on your needs)
+	s.log(ctx, slog.LevelInfo, "nextcloud download completed", "bytes", len(fileData), "status", resp.StatusCode)
 	return fileData, nil
 }
 func (s *NextcloudService) LookupFile(ctx context.Context, filename string) (any, error) {
+	s.log(ctx, slog.LevelDebug, "nextcloud lookup started")
 	req, err := http.NewRequestWithContext(ctx, "GET", s.apiLookupUrl, nil)
 	if err != nil {
 		return nil, err
@@ -229,9 +239,11 @@ func (s *NextcloudService) LookupFile(ctx context.Context, filename string) (any
 		})
 	}
 
+	s.log(ctx, slog.LevelInfo, "nextcloud lookup completed", "result_count", len(results), "status", resp.StatusCode)
 	return results, nil
 }
 func (s *NextcloudService) CheckStatus(ctx context.Context) error {
+	s.log(ctx, slog.LevelDebug, "nextcloud health check started")
 	// simple request to the WebDAV endpoint.
 	req, err := http.NewRequestWithContext(ctx, "GET", s.apiLookupUrl, nil)
 	if err != nil {
@@ -246,8 +258,16 @@ func (s *NextcloudService) CheckStatus(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		s.log(ctx, slog.LevelWarn, "nextcloud health check failed", "status", resp.StatusCode)
 		return fmt.Errorf("nextcloud authentication failed with status: %d", resp.StatusCode)
 	}
 
+	s.log(ctx, slog.LevelDebug, "nextcloud health check completed", "status", resp.StatusCode)
 	return nil
+}
+
+func (s *NextcloudService) log(ctx context.Context, level slog.Level, message string, args ...any) {
+	if s.logger != nil {
+		s.logger.Log(ctx, level, message, args...)
+	}
 }

@@ -1,40 +1,61 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 
 	"github.com/HTMLuke/OneLab-API/auth"
+	backupservice "github.com/HTMLuke/OneLab-API/backupService"
 	"github.com/HTMLuke/OneLab-API/config"
+	encryptionservice "github.com/HTMLuke/OneLab-API/encryptionService"
 	"github.com/HTMLuke/OneLab-API/fileService"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
 )
 
 // registerIntegrations wires every enabled integration into its controller
 // Integrations register themselves from their own files via their init()
-func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, ac *auth.AuthController) {
+func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, bc *backupservice.Controller, ac *auth.AuthController, ec *encryptionservice.Controller, logger *slog.Logger) {
 	for name, build := range fileService.Builders() {
 		if !cfg.IsServiceEnabled(name) {
 			continue
 		}
-		svc, err := build(cfg.GetServiceURL(name), s)
+		svc, err := build(cfg.GetServiceURL(name), s, logger)
 		if err != nil {
-			log.Printf("Warning: service '%s' is enabled but failed to initialize (%v), skipping", name, err)
+			logger.Warn("service integration failed to initialize", "integration", name, "error", err)
 			continue
 		}
 		fc.AddIntegration(name, svc)
-		log.Printf("service integration enabled: %s", name)
+		if target, ok := svc.(backupservice.Target); ok {
+			bc.AddTarget(name, target)
+		}
+		if name == "paperless" {
+			bc.AddSource(name, backupservice.NewPaperlessService(logger))
+		}
+		logger.Info("service integration enabled", "integration", name)
 	}
 
 	for name, build := range auth.Builders() {
 		if !cfg.IsAuthEnabled(name) {
 			continue
 		}
-		svc, err := build(cfg.GetAuthExpiry(), s)
+		svc, err := build(cfg.GetAuthExpiry(), s, logger)
 		if err != nil {
-			log.Printf("Warning: auth '%s' is enabled but failed to initialize (%v), skipping", name, err)
+			logger.Warn("auth integration failed to initialize", "integration", name, "error", err)
 			continue
 		}
 		ac.AddIntegration(name, svc)
-		log.Printf("auth integration enabled: %s", name)
+		logger.Info("auth integration enabled", "integration", name)
+	}
+
+	for name, build := range encryptionservice.Builders() {
+		if !cfg.IsServiceEnabled(name) {
+			continue
+		}
+		svc, err := build(s, logger)
+		if err != nil {
+			logger.Warn("encryption integration failed to initialize", "integration", name, "error", err)
+			continue
+		}
+		ec.AddIntegration(name, svc)
+		logger.Info("encryption integration enabled", "integration", name)
 	}
 }

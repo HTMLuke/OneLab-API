@@ -13,10 +13,10 @@ type IntegrationService interface {
 	AddFile(ctx context.Context, file []byte, filename string) error
 }
 
-// PaperlessBackupService is an optional interface for services that can prepare and
-// persist a local backup export created inside the target application container.
-type PaperlessBackupService interface {
-	Backup(ctx context.Context) (string, error)
+// NamedFileGetter is an optional interface for integrations that can return
+// the filename supplied by the source while downloading a file.
+type NamedFileGetter interface {
+	GetFileWithName(ctx context.Context, fileID string) ([]byte, string, error)
 }
 
 // FileTransferer is an optional interface.

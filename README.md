@@ -27,12 +27,15 @@ The project is designed to run as a single lightweight service and can be deploy
 ## Project layout
 
 - [main.go](main.go) — app startup and HTTP routing
-- [registry.go](registry.go) — integration wiring for file and auth services
+- [registry.go](registry.go) — integration wiring for auth, file, backup, and encryption services
 - [auth/](auth) — auth integrations and validation logic
-- [fileService/](fileService) — Nextcloud and Paperless integrations
+- [fileService/](fileService) — Nextcloud and Paperless file integrations and transfers
+- [backupService/](backupService) — backup orchestration, backup endpoints, Paperless exports, and target uploads
+- [encryptionService/](encryptionService) — backup encryption integrations, including PGP
 - [shellService/](shellService) — shell execution service implementations
 - [config/](config) — configuration loading and defaults
 - [secretProvider/](secretProvider) — environment-based secret access
+- [logging/](logging) — application logging setup
 - [Dockerfile](Dockerfile) — production container image
 - [docker-compose.yml](docker-compose.yml) — local compose run configuration
 - [.github/workflows/deploy.yaml](.github/workflows/deploy.yaml) — self-hosted deployment workflow
@@ -103,6 +106,9 @@ Example service entries in [config/config.json](config/config.json):
 The `dockerCmd` entry is intentionally local-only. It does not call an HTTP API and does not need a remote base URL.
 
 The example config in [config/example-config.json](config/example-config.json) shows the same structure with disabled defaults.
+The `pgp` integration is internal and has no HTTP routes. It is configured only
+through `ONELAB_PGP_PUBLIC_KEY`; the example config keeps it disabled until
+that environment value contains a real ASCII-armored public key.
 
 ---
 
@@ -130,7 +136,14 @@ ONELAB_NEXTCLOUD_PASSWORD=your-nextcloud-password
 # Paperless-ngx
 ONELAB_PAPERLESS_BASE_URL=http://paperless.local/
 ONELAB_PAPERLESS_TOKEN=your-paperless-api-token
+
+# OpenPGP public key (ASCII-armored)
+ONELAB_PGP_PUBLIC_KEY="-----BEGIN PGP PUBLIC KEY BLOCK----- ..."
 ```
+
+### Container logging
+
+The application writes structured JSON logs to stdout so Docker and other container runtimes can collect them. Set `ONELAB_LOG_LEVEL` to `debug`, `info` (default), `warn`, or `error` to control verbosity. The logger never writes application log files inside the container.
 
 See [.env.example](.env.example) for the full reference file.
 
@@ -173,6 +186,13 @@ The file service integrations are registered in [fileService/registry.go](fileSe
 - supports file lookup and transfer-style workflows for the Paperless service
 - requires `ONELAB_PAPERLESS_TOKEN`
 - optional base URL via `ONELAB_PAPERLESS_BASE_URL`
+
+## OpenPGP encryption
+
+The `encryptionService` package loads an ASCII-armored public key from
+`ONELAB_PGP_PUBLIC_KEY`. It provides internal helpers for encrypting byte
+data, strings, JSON values, and file contents. It intentionally does not load
+private keys, decrypt messages, or expose signing functionality.
 
 ---
 
@@ -223,6 +243,45 @@ The file controller registers these routes through `authController.Middleware`:
 | --- | --- | --- |
 | `POST` | `/api/v1/files/transfer/` | transfer a file from one configured service to another |
 | `GET` | `/api/v1/files/lookup/` | search for a file in a configured source service |
+| `GET` | `/api/v1/backup` | create a backup from a configured source |
+
+The transfer request accepts an optional `encryption` field. Set it to a
+registered encryption method such as `pgp` to encrypt the file before it is
+uploaded to the target service. When transferring from Paperless, the
+destination filename is read from the download response's
+`Content-Disposition` header. The RFC 5987 `filename*` parameter is preferred
+over `filename` and is URL-decoded. This preserves the original filename of the
+PDF as it was uploaded to Paperless, rather than using the Paperless document
+title. The download fails if Paperless does not provide a filename in that
+header. Encrypted transfers append `.pgp` to the resulting filename. Omitting
+the field transfers the original file unchanged.
+
+```json
+{
+  "source": "nextcloud",
+  "target": "paperless",
+  "filename": "report.pdf",
+  "encryption": "pgp"
+}
+```
+
+Encryption methods are selected through an internal interface, so additional
+methods can be registered without changing the transfer endpoint.
+
+The general backup endpoint requires `source` and `target` query parameters.
+The `encryption` parameter is optional:
+
+```text
+GET /api/v1/backup?source=paperless&target=nextcloud&encryption=pgp
+```
+
+The backup is created by the selected backup source, optionally encrypted with
+the configured public key, and uploaded to the selected file integration
+through the `IntegrationService` interface. The original filename of the
+generated backup is used, with `.pgp` appended when encryption is enabled. The
+local backup file is deleted after the upload succeeds. The temporary ZIP inside
+the Paperless container is deleted after it has been copied to the local backup
+directory.
 
 Example token creation:
 

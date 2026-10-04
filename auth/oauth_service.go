@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ type oauthService struct {
 	introspectionURL string
 	scope            string
 	httpClient       *http.Client
+	logger           *slog.Logger
 }
 
 type oidcDiscoveryResponse struct {
@@ -43,7 +45,7 @@ func init() {
 	RegisterAuth("oauth", NewOAuthService)
 }
 
-func NewOAuthService(_ time.Duration, secretService secretProvider.SecretService) (AuthService, error) {
+func NewOAuthService(_ time.Duration, secretService secretProvider.SecretService, logger *slog.Logger) (AuthService, error) {
 	clientID, err := secretService.GetSecret("ONELAB_OAUTH_CLIENT_ID")
 	if err != nil {
 		return nil, err
@@ -88,6 +90,7 @@ func NewOAuthService(_ time.Duration, secretService secretProvider.SecretService
 		introspectionURL: introspectionURL,
 		scope:            scope,
 		httpClient:       &http.Client{Timeout: 10 * time.Second},
+		logger:           logger,
 	}, nil
 }
 

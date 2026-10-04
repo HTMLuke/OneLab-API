@@ -6,19 +6,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
+	"time"
 )
 
 type FileController struct {
 	// A map of available integration services (e.g., "nextcloud", "paperless")
 	integrations map[string]IntegrationService
+	encryption   func(method string, file []byte) ([]byte, error)
+	logger       *slog.Logger
 }
 
-func NewFileController() *FileController {
+func NewFileController(logger *slog.Logger, encryption func(method string, file []byte) ([]byte, error)) *FileController {
 	return &FileController{
 		integrations: make(map[string]IntegrationService),
+		encryption:   encryption,
+		logger:       logger,
 	}
 }
 
@@ -71,7 +76,17 @@ func (c *FileController) GetValueFromQuery(r *http.Request, key string) (string,
 	}
 	return value, nil
 }
+
+func (c *FileController) GetOptionalValueFromBody(r *http.Request, key string) (string, error) {
+	value, err := c.GetValueFromBody(r, key)
+	if err != nil && strings.HasPrefix(err.Error(), fmt.Sprintf("key '%s' not found", key)) {
+		return "", nil
+	}
+	return value, err
+}
+
 func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	source, err := c.GetValueFromBody(r, "source")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
@@ -88,6 +103,11 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, fmt.Sprintf("filename query parameter is required: %v", err), http.StatusBadRequest)
 		return
 	}
+	encryption, err := c.GetOptionalValueFromBody(r, "encryption")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("encryption must be a string: %v", err), http.StatusBadRequest)
+		return
+	}
 
 	tvc, exists := c.integrations[target]
 	if !exists {
@@ -100,17 +120,20 @@ func (c *FileController) HTTPTransferHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, fmt.Sprintf("Source software '%s' is not supported", source), http.StatusBadRequest)
 		return
 	}
-	err, statusCode := c.TransferHandler(svc, tvc, filename, r.Context())
+	err, statusCode := c.TransferHandler(svc, tvc, filename, encryption, r.Context())
 	if err != nil {
+		c.log(r.Context(), slog.LevelWarn, "file transfer failed", "source", source, "target", target, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		http.Error(w, fmt.Sprintf("Error transferring file: %v", err), statusCode)
 		return
 	} else {
+		c.log(r.Context(), slog.LevelInfo, "file transfer completed", "source", source, "target", target, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		w.WriteHeader(statusCode)
 		return
 	}
 }
-func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename string, ctx context.Context) (error, int) {
+func (c *FileController) TransferHandler(svc IntegrationService, tvc IntegrationService, filename, encryption string, ctx context.Context) (error, int) {
 	var fileID string
+	destinationFilename := filename
 	foundFiles, err, statusCode := c.LookupHandler(svc, filename, ctx) // Reuse the lookup handler to validate the file exists before transfer
 	if err != nil {
 		return err, statusCode
@@ -135,16 +158,39 @@ func (c *FileController) TransferHandler(svc IntegrationService, tvc Integration
 			return fmt.Errorf("multiple files found with name '%s' in source, please specify more precise filename", filename), http.StatusBadRequest
 		}
 		fileID = fmt.Sprintf("%d", files[0].ID)
+		if files[0].OriginalFileName != "" {
+			destinationFilename = files[0].OriginalFileName
+		}
 	default:
 		return fmt.Errorf("unsupported response type from source lookup"), http.StatusInternalServerError
 	}
 
-	file, err := svc.GetFile(ctx, fileID)
+	var file []byte
+	var downloadFilename string
+	if namedGetter, ok := svc.(NamedFileGetter); ok {
+		file, downloadFilename, err = namedGetter.GetFileWithName(ctx, fileID)
+		if err == nil {
+			destinationFilename = downloadFilename
+		}
+	} else {
+		file, err = svc.GetFile(ctx, fileID)
+	}
 	if err != nil {
 		return fmt.Errorf("error retrieving file content: %v", err), http.StatusInternalServerError
 	}
+	if encryption != "" {
+		if c.encryption == nil {
+			return fmt.Errorf("encryption provider is not configured"), http.StatusNotImplemented
+		}
+		file, err = c.encryption(encryption, file)
+		if err != nil {
+			return fmt.Errorf("error encrypting file with %s: %v", encryption, err), http.StatusBadRequest
+		}
+		// add right extension to filename if encrypted
+		destinationFilename += ".pgp"
+	}
 
-	err = tvc.AddFile(ctx, file, filename)
+	err = tvc.AddFile(ctx, file, destinationFilename)
 	if err != nil {
 		return fmt.Errorf("error adding file to target: %v", err), http.StatusInternalServerError
 	}
@@ -156,14 +202,17 @@ func (c *FileController) CheckIntegrationsStatus(ctx context.Context) map[string
 	statusMap := make(map[string]string)
 	for name, svc := range c.integrations {
 		if err := svc.CheckStatus(ctx); err != nil {
+			c.log(ctx, slog.LevelWarn, "integration health check failed", "integration", name)
 			statusMap[name] = fmt.Sprintf("DOWN (%v)", err.Error())
 		} else {
+			c.log(ctx, slog.LevelDebug, "integration health check passed", "integration", name)
 			statusMap[name] = "OK"
 		}
 	}
 	return statusMap
 }
 func (c *FileController) HTTPLookupHandler(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	source, err := c.GetValueFromQuery(r, "source")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("source query parameter is required: %v", err), http.StatusBadRequest)
@@ -185,15 +234,18 @@ func (c *FileController) HTTPLookupHandler(w http.ResponseWriter, r *http.Reques
 
 	result, err, statusCode := c.LookupHandler(svc, filename, r.Context())
 	if err != nil {
+		c.log(r.Context(), slog.LevelWarn, "file lookup failed", "source", sourceSoft, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 		http.Error(w, fmt.Sprintf("Error looking up file from %s: %v", sourceSoft, err), statusCode)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
+		c.log(r.Context(), slog.LevelError, "file lookup response encoding failed", "source", sourceSoft, "status", http.StatusInternalServerError)
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 		return
 	}
+	c.log(r.Context(), slog.LevelInfo, "file lookup completed", "source", sourceSoft, "status", statusCode, "duration_ms", time.Since(started).Seconds()*1000)
 
 }
 func (c *FileController) LookupHandler(svc IntegrationService, filename string, ctx context.Context) (any, error, int) {
@@ -211,33 +263,9 @@ func (c *FileController) LookupHandler(svc IntegrationService, filename string, 
 		return nil, fmt.Errorf("lookup not supported for source"), http.StatusBadRequest
 	}
 }
-func (c *FileController) HandlePaperlessBackup(w http.ResponseWriter, r *http.Request) {
-	paperlessSvc, exists := c.integrations["paperless"]
-	if !exists {
-		http.Error(w, "paperless integration is not configured", http.StatusNotFound)
-		return
-	}
-
-	backupSvc, ok := paperlessSvc.(PaperlessBackupService)
-	if !ok {
-		http.Error(w, "paperless backup is not supported", http.StatusNotImplemented)
-		return
-	}
-
-	path, err := backupSvc.Backup(r.Context())
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to create paperless backup: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]any{
-		"status":   "ok",
-		"path":     path,
-		"filename": filepath.Base(path),
-	}); err != nil {
-		http.Error(w, fmt.Sprintf("failed to encode backup response: %v", err), http.StatusInternalServerError)
+func (c *FileController) log(ctx context.Context, level slog.Level, message string, args ...any) {
+	if c.logger != nil {
+		c.logger.Log(ctx, level, message, args...)
 	}
 }
 
@@ -245,9 +273,7 @@ func (c *FileController) RegisterRoutes(mux *http.ServeMux, authMiddleware func(
 
 	transferHandler := http.HandlerFunc(c.HTTPTransferHandler)
 	lookupHandler := http.HandlerFunc(c.HTTPLookupHandler)
-	backupHandler := http.HandlerFunc(c.HandlePaperlessBackup)
 
 	mux.Handle("POST /api/v1/files/transfer/", authMiddleware(transferHandler))
 	mux.Handle("GET /api/v1/files/lookup/", authMiddleware(lookupHandler))
-	mux.Handle("GET /api/v1/paperless/backup", authMiddleware(backupHandler))
 }

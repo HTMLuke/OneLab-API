@@ -13,6 +13,10 @@
       "dockerCmd": {
         "enabled": false,
         "url": "local"
+      },
+      "pgp": {
+        "enabled": false,
+        "url": ""
       }
     },
     "auth": {
