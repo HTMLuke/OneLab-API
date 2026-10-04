@@ -2,25 +2,28 @@ package main
 
 import (
 	"log/slog"
+	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/HTMLuke/OneLab-API/auth"
 	backupservice "github.com/HTMLuke/OneLab-API/backupService"
-	"github.com/HTMLuke/OneLab-API/config"
 	encryptionservice "github.com/HTMLuke/OneLab-API/encryptionService"
 	"github.com/HTMLuke/OneLab-API/fileService"
 	"github.com/HTMLuke/OneLab-API/secretProvider"
 )
 
-// registerIntegrations wires every enabled integration into its controller
+// registerIntegrations wires every integration whose environment configuration is complete.
 // Integrations register themselves from their own files via their init()
-func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretService, fc *fileService.FileController, bc *backupservice.Controller, ac *auth.AuthController, ec *encryptionservice.Controller, logger *slog.Logger) {
+func registerIntegrations(s secretProvider.SecretService, fc *fileService.FileController, bc *backupservice.Controller, ac *auth.AuthController, ec *encryptionservice.Controller, logger *slog.Logger) {
 	for name, build := range fileService.Builders() {
-		if !cfg.IsServiceEnabled(name) {
+		if !integrationEnabled(name, logger) {
 			continue
 		}
-		svc, err := build(cfg.GetServiceURL(name), s, logger)
+		svc, err := build(serviceBaseURL(name), s, logger)
 		if err != nil {
-			logger.Warn("service integration failed to initialize", "integration", name, "error", err)
+			logger.Warn("service integration skipped", "integration", name, "reason", err)
 			continue
 		}
 		fc.AddIntegration(name, svc)
@@ -34,12 +37,12 @@ func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretServi
 	}
 
 	for name, build := range auth.Builders() {
-		if !cfg.IsAuthEnabled(name) {
+		if !integrationEnabled(name, logger) {
 			continue
 		}
-		svc, err := build(cfg.GetAuthExpiry(), s, logger)
+		svc, err := build(authExpiry(logger), s, logger)
 		if err != nil {
-			logger.Warn("auth integration failed to initialize", "integration", name, "error", err)
+			logger.Warn("auth integration skipped", "integration", name, "reason", err)
 			continue
 		}
 		ac.AddIntegration(name, svc)
@@ -47,15 +50,62 @@ func registerIntegrations(cfg config.ConfigService, s secretProvider.SecretServi
 	}
 
 	for name, build := range encryptionservice.Builders() {
-		if !cfg.IsServiceEnabled(name) {
+		if !integrationEnabled(name, logger) {
 			continue
 		}
 		svc, err := build(s, logger)
 		if err != nil {
-			logger.Warn("encryption integration failed to initialize", "integration", name, "error", err)
+			logger.Warn("encryption integration skipped", "integration", name, "reason", err)
 			continue
 		}
 		ec.AddIntegration(name, svc)
 		logger.Info("encryption integration enabled", "integration", name)
 	}
+}
+
+func integrationEnabled(name string, logger *slog.Logger) bool {
+	key := "ONELAB_" + envName(name) + "_ENABLED"
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("invalid integration enable flag; integration disabled", "integration", name, "env", key, "value", value)
+		}
+		return false
+	}
+	return enabled
+}
+
+func serviceBaseURL(name string) string {
+	envName := envName(name)
+	for _, key := range []string{
+		"ONELAB_" + envName + "_BASE_URL",
+		"ONELAB_" + envName + "_URL",
+	} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func authExpiry(logger *slog.Logger) time.Duration {
+	const defaultHours = 6
+	value := strings.TrimSpace(os.Getenv("ONELAB_AUTH_EXPIRY_HOURS"))
+	if value == "" {
+		return defaultHours * time.Hour
+	}
+	hours, err := strconv.Atoi(value)
+	if err != nil || hours <= 0 {
+		logger.Warn("invalid auth expiry; using default", "env", "ONELAB_AUTH_EXPIRY_HOURS", "value", value, "default_hours", defaultHours)
+		return defaultHours * time.Hour
+	}
+	return time.Duration(hours) * time.Hour
+}
+
+func envName(name string) string {
+	return strings.ToUpper(strings.NewReplacer("-", "_", " ", "_", ".", "_").Replace(name))
 }

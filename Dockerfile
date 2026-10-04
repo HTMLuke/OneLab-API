@@ -10,6 +10,5 @@ RUN apk add --no-cache ca-certificates docker-cli \
 	&& update-ca-certificates
 WORKDIR /app
 COPY --from=builder /onelab-api /onelab-api
-COPY --from=builder /app/config ./config
 EXPOSE 8080
 CMD ["/onelab-api"]

@@ -19,7 +19,7 @@ The project is designed to run as a single lightweight service and can be deploy
 - OAuth/OIDC client-credential auth via the `oauth` integration
 - file lookup and transfer between configured services
 - local Docker command execution via `dockerCmd`
-- configuration-driven enablement of integrations
+- environment-driven integration enablement
 - Docker image build and deployment support
 
 ---
@@ -33,7 +33,6 @@ The project is designed to run as a single lightweight service and can be deploy
 - [backupService/](backupService) — backup orchestration, backup endpoints, Paperless exports, and target uploads
 - [encryptionService/](encryptionService) — backup encryption integrations, including PGP
 - [shellService/](shellService) — shell execution service implementations
-- [config/](config) — configuration loading and defaults
 - [secretProvider/](secretProvider) — environment-based secret access
 - [logging/](logging) — application logging setup
 - [Dockerfile](Dockerfile) — production container image
@@ -60,55 +59,20 @@ go mod download
 cp .env.example .env
 ```
 
-Then review and adjust the config in [config/config.json](config/config.json) and the environment values in [.env.example](.env.example).
+Then review and adjust the environment values in [.env.example](.env.example).
 
 ---
 
 ## Configuration
 
-The app loads configuration from two places:
+All configuration is read from environment variables loaded from `.env` or the
+process environment. There is no configuration file. Integrations are enabled
+automatically when their required environment variables are present and their
+initializer succeeds. Set `ONELAB_<INTEGRATION>_ENABLED=false` to disable an
+integration explicitly. Missing or invalid required values leave that
+integration disabled without preventing the API from starting.
 
-1. Environment variables loaded from `.env` or the process environment
-2. [config/config.json](config/config.json) for non-secret integration settings
-
-### Auth config
-
-The default auth config is:
-
-```json
-"auth": {
-  "jwt": false,
-  "oauth": true
-}
-```
-
-### Service config
-
-Example service entries in [config/config.json](config/config.json):
-
-```json
-"services": {
-  "nextcloud": {
-    "enabled": true,
-    "url": ""
-  },
-  "paperless": {
-    "enabled": true,
-    "url": ""
-  },
-  "dockerCmd": {
-    "enabled": true,
-    "url": "local"
-  }
-}
-```
-
-The `dockerCmd` entry is intentionally local-only. It does not call an HTTP API and does not need a remote base URL.
-
-The example config in [config/example-config.json](config/example-config.json) shows the same structure with disabled defaults.
-The `pgp` integration is internal and has no HTTP routes. It is configured only
-through `ONELAB_PGP_PUBLIC_KEY`; the example config keeps it disabled until
-that environment value contains a real ASCII-armored public key.
+`ONELAB_AUTH_EXPIRY_HOURS` controls JWT token lifetime and defaults to `6`.
 
 ---
 
@@ -158,7 +122,7 @@ The app registers auth providers through the registry pattern in [auth/registry.
 The JWT service signs and validates tokens locally using a configured secret.
 
 - configured via `ONELAB_JWT_SECRET`
-- enabled via `config.json`
+- enabled automatically when its required environment variables are present
 - used to issue bearer tokens for protected endpoints
 
 ### `oauth`
@@ -179,13 +143,13 @@ The file service integrations are registered in [fileService/registry.go](fileSe
 - supports file lookup and file transfer
 - requires `ONELAB_NEXTCLOUD_USER`
 - requires `ONELAB_NEXTCLOUD_PASSWORD`
-- optional base URL via `ONELAB_NEXTCLOUD_BASE_URL`
+- base URL via `ONELAB_NEXTCLOUD_BASE_URL`
 
 ### `paperless`
 
 - supports file lookup and transfer-style workflows for the Paperless service
 - requires `ONELAB_PAPERLESS_TOKEN`
-- optional base URL via `ONELAB_PAPERLESS_BASE_URL`
+- base URL via `ONELAB_PAPERLESS_BASE_URL`
 
 ## OpenPGP encryption
 
@@ -376,6 +340,6 @@ This project is intentionally modular:
 - auth integrations are independent providers
 - file integrations are independent providers
 - shell services are independent backends
-- the app selects registered implementations via config and init registration patterns
+- the app selects registered implementations via environment variables and init registration patterns
 
 This makes it easy to add more providers without modifying the main entry point.
