@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/HTMLuke/OneLab-API/secretProvider"
@@ -76,6 +77,12 @@ func init() {
 }
 
 func NewNextcloudService(baseURL string, secretService secretProvider.SecretService, logger *slog.Logger) (*NextcloudService, error) {
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = strings.TrimSpace(os.Getenv("ONELAB_NEXTCLOUD_BASE_URL"))
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("required environment variable %q is not set", "ONELAB_NEXTCLOUD_BASE_URL")
+	}
 	username, err := secretService.GetSecret("ONELAB_NEXTCLOUD_USER")
 	if err != nil {
 		return nil, err
@@ -83,9 +90,6 @@ func NewNextcloudService(baseURL string, secretService secretProvider.SecretServ
 	password, err := secretService.GetSecret("ONELAB_NEXTCLOUD_PASSWORD")
 	if err != nil {
 		return nil, err
-	}
-	if baseURL == "" {
-		baseURL = "http://nextcloud.local/"
 	}
 	apiLookup, _ := url.JoinPath(baseURL, "ocs/v2.php/search/providers/files/search")
 	apiAdd, _ := url.JoinPath(baseURL, "remote.php/dav/files/")

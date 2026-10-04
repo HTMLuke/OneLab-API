@@ -7,7 +7,6 @@ import (
 
 	"github.com/HTMLuke/OneLab-API/auth"
 	backupservice "github.com/HTMLuke/OneLab-API/backupService"
-	"github.com/HTMLuke/OneLab-API/config"
 	encryptionservice "github.com/HTMLuke/OneLab-API/encryptionService"
 	"github.com/HTMLuke/OneLab-API/fileService"
 	"github.com/HTMLuke/OneLab-API/logging"
@@ -30,20 +29,15 @@ func main() {
 		}
 	}
 
-	// Initialize Config Service
-	cfgService, err := config.NewConfigService(logger)
-	if err != nil {
-		logger.Warn("failed to load config file; using defaults and environment", "error", err)
-	}
 	secretService := secretProvider.NewSecretService(logger)
 	mux := http.NewServeMux()
 
-	// Build controllers and wire in every integration enabled in config
+	// Build controllers and wire in integrations configured through environment variables.
 	authController := auth.NewAuthController(logger)
 	eController := encryptionservice.NewController()
 	fController := fileService.NewFileController(logger, eController.Encrypt)
 	bController := backupservice.NewController(logger, eController.Encrypt)
-	registerIntegrations(cfgService, secretService, fController, bController, authController, eController, logger)
+	registerIntegrations(secretService, fController, bController, authController, eController, logger)
 	authController.RegisterRoutes(mux)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

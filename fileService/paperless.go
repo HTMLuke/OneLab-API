@@ -11,6 +11,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 
 	"github.com/HTMLuke/OneLab-API/secretProvider"
 )
@@ -74,12 +76,15 @@ func init() {
 }
 
 func NewPaperlessService(baseURL string, secretService secretProvider.SecretService, logger *slog.Logger) (*PaperlessService, error) {
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = strings.TrimSpace(os.Getenv("ONELAB_PAPERLESS_BASE_URL"))
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("required environment variable %q is not set", "ONELAB_PAPERLESS_BASE_URL")
+	}
 	token, err := secretService.GetSecret("ONELAB_PAPERLESS_TOKEN")
 	if err != nil {
 		return nil, err
-	}
-	if baseURL == "" {
-		baseURL = "http://paperless.local/"
 	}
 	checkURL, _ := url.JoinPath(baseURL, "api/documents/")
 	addUrl, _ := url.JoinPath(baseURL, "api/documents/post_document/")

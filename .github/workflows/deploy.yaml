@@ -15,14 +15,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create dev config
-        env:
-          APP_CONFIG: ${{ secrets.DEV_APP_CONFIG }}
-        run: |
-          test -n "$APP_CONFIG"
-          printf '%s' "$APP_CONFIG" > config/config.json
-          chmod 600 config/config.json
-
       - name: Deploy dev with Docker
         env:
           SECRET_NC_USER: ${{ secrets.DEV_NEXTCLOUD_USER }}
@@ -57,11 +49,6 @@ jobs:
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
             onelab-api:dev
 
-      - name: Remove dev config
-        if: always()
-        run: |
-          rm -f config/config.json
-
       - name: Cleanup
         run: docker image prune -f
 
@@ -86,14 +73,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Create prod config
-        env:
-          APP_CONFIG: ${{ secrets.PROD_APP_CONFIG }}
-        run: |
-          test -n "$APP_CONFIG"
-          printf '%s' "$APP_CONFIG" > config/config.json
-          chmod 600 config/config.json
 
       - name: Deploy prod with Docker
         env:
@@ -128,11 +107,6 @@ jobs:
             -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
             onelab-api:prod
-
-      - name: Remove prod config
-        if: always()
-        run: |
-          rm -f config/config.json
 
       - name: Cleanup
         run: docker image prune -f
