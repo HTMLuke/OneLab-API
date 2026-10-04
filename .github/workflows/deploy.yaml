@@ -25,6 +25,11 @@ jobs:
           SECRET_JWT: ${{ secrets.DEV_JWT_SECRET }}
           SECRET_CLIENT_ID: ${{ secrets.DEV_AUTH_CLIENT_ID }}
           SECRET_CLIENT_SECRET: ${{ secrets.DEV_AUTH_CLIENT_SECRET }}
+          SECRET_PGP_PUBLIC_KEY: ${{ secrets.DEV_PGP_PUBLIC_KEY }}
+          SECRET_OAUTH_CLIENT_ID: ${{ secrets.DEV_OAUTH_CLIENT_ID }}
+          SECRET_OAUTH_CLIENT_SECRET: ${{ secrets.DEV_OAUTH_CLIENT_SECRET }}
+          SECRET_OAUTH_ISSUER_URL: ${{ secrets.DEV_OAUTH_ISSUER_URL }}
+          SECRET_OAUTH_TOKEN_URL: ${{ secrets.DEV_OAUTH_TOKEN_URL }}
         run: |
           docker stop onelab-api-dev || true
           docker rm onelab-api-dev || true
@@ -47,6 +52,18 @@ jobs:
             -e ONELAB_JWT_SECRET="$SECRET_JWT" \
             -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
+            -e ONELAB_AUTH_EXPIRY_HOURS=6 \
+            -e ONELAB_JWT_ENABLED=true \
+            -e ONELAB_OAUTH_ENABLED=true \
+            -e ONELAB_NEXTCLOUD_ENABLED=true \
+            -e ONELAB_PAPERLESS_ENABLED=true \
+            -e ONELAB_PGP_ENABLED=true \
+            -e ONELAB_PGP_PUBLIC_KEY="$SECRET_PGP_PUBLIC_KEY" \
+            -e ONELAB_OAUTH_CLIENT_ID="$SECRET_OAUTH_CLIENT_ID" \
+            -e ONELAB_OAUTH_CLIENT_SECRET="$SECRET_OAUTH_CLIENT_SECRET" \
+            -e ONELAB_OAUTH_ISSUER_URL="$SECRET_OAUTH_ISSUER_URL" \
+            -e ONELAB_OAUTH_TOKEN_URL="$SECRET_OAUTH_TOKEN_URL" \
+            -e ONELAB_LOG_LEVEL=info \
             onelab-api:dev
 
       - name: Cleanup
@@ -84,6 +101,11 @@ jobs:
           SECRET_JWT: ${{ secrets.PROD_JWT_SECRET }}
           SECRET_CLIENT_ID: ${{ secrets.PROD_AUTH_CLIENT_ID }}
           SECRET_CLIENT_SECRET: ${{ secrets.PROD_AUTH_CLIENT_SECRET }}
+          SECRET_PGP_PUBLIC_KEY: ${{ secrets.PROD_PGP_PUBLIC_KEY }}
+          SECRET_OAUTH_CLIENT_ID: ${{ secrets.PROD_OAUTH_CLIENT_ID }}
+          SECRET_OAUTH_CLIENT_SECRET: ${{ secrets.PROD_OAUTH_CLIENT_SECRET }}
+          SECRET_OAUTH_ISSUER_URL: ${{ secrets.PROD_OAUTH_ISSUER_URL }}
+          SECRET_OAUTH_TOKEN_URL: ${{ secrets.PROD_OAUTH_TOKEN_URL }}
         run: |
           docker stop onelab-api-prod || true
           docker rm onelab-api-prod || true
@@ -106,6 +128,18 @@ jobs:
             -e ONELAB_JWT_SECRET="$SECRET_JWT" \
             -e ONELAB_AUTH_CLIENT_ID="$SECRET_CLIENT_ID" \
             -e ONELAB_AUTH_CLIENT_SECRET="$SECRET_CLIENT_SECRET" \
+            -e ONELAB_AUTH_EXPIRY_HOURS=6 \
+            -e ONELAB_JWT_ENABLED=true \
+            -e ONELAB_OAUTH_ENABLED=true \
+            -e ONELAB_NEXTCLOUD_ENABLED=true \
+            -e ONELAB_PAPERLESS_ENABLED=true \
+            -e ONELAB_PGP_ENABLED=true \
+            -e ONELAB_PGP_PUBLIC_KEY="$SECRET_PGP_PUBLIC_KEY" \
+            -e ONELAB_OAUTH_CLIENT_ID="$SECRET_OAUTH_CLIENT_ID" \
+            -e ONELAB_OAUTH_CLIENT_SECRET="$SECRET_OAUTH_CLIENT_SECRET" \
+            -e ONELAB_OAUTH_ISSUER_URL="$SECRET_OAUTH_ISSUER_URL" \
+            -e ONELAB_OAUTH_TOKEN_URL="$SECRET_OAUTH_TOKEN_URL" \
+            -e ONELAB_LOG_LEVEL=info \
             onelab-api:prod
 
       - name: Cleanup
