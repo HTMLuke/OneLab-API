@@ -54,7 +54,7 @@ The project is designed to run as a single lightweight service and can be deploy
 ## Quick start
 
 ```bash
-git clone https://github.com/Henriii-01/OneLab-API.git
+git clone https://github.com/HTMLuke/OneLab-API.git
 cd OneLab-API
 go mod download
 cp .env.example .env
